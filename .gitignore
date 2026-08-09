@@ -1,0 +1,8 @@
+.env
+data/
+!data/seed_registry.json
+exports/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
