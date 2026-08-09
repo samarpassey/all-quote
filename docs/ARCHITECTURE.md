@@ -35,7 +35,9 @@ all-quote/
 │   ├── redact.py          # text + image redaction; used by evidence only
 │   ├── evidence.py        # ONLY writer to data/evidence/; redact→hash→index
 │   ├── planner.py         # route → executor decisions, bounded-attempt policy
-│   ├── normalize.py       # raw result → QuoteResult; dedupe resolver; metrics
+│   ├── normalize.py       # raw result → QuoteResult; dedupe resolver
+│   ├── metrics.py         # market_completion, comparable_quote_yield, evidence_rate,
+│   │                      # duplicate_suppression, freshness (docs/SCHEMAS.md Metrics)
 │   ├── executors/
 │   │   ├── browser.py     # browser-use agent wrapper
 │   │   └── voice.py       # Vapi client + webhook outcome handler

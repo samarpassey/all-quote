@@ -1,8 +1,12 @@
 .env
-data/
+data/*
 !data/seed_registry.json
-exports/
+exports/*
+!exports/.gitkeep
 __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+*.db
+vault.enc
+.DS_Store

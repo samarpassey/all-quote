@@ -79,6 +79,18 @@ included | excluded | unavailable | unknown.
   medium = licensed rep documented quote; low = estimate/unresolved diff
 - privacy: fields_disclosed[], consent_receipt_id, retention_deadline
 
+## EvidenceRecord (evidence-index row)
+
+Written by `evidence.py` (Task 4) on every save. One row per artifact: evidence_id
+(uuid4 hex), registry_id (FK to MarketRecord), kind ∈ {screenshot, html_snapshot,
+call_transcript, call_outcome, consent_receipt, document}, timestamp (ISO 8601
+UTC), source_url_or_phone, artifact_path (relative, under data/evidence/),
+evidence_hash (sha256 hex digest of the artifact), redacted (bool — must be true
+before any disk write), fields_disclosed[] (plain field NAMES only, never
+values), consent_receipt_id (nullable), retention_deadline (nullable). The last
+four fields mirror QuoteResult's privacy group and back the evidence drill-down
+view and the one-click delete-all flow (see docs/GUARDRAILS.md retention rules).
+
 ## Metrics (computed, never hand-edited)
 
 market_completion = evidence-backed terminal statuses ÷ verified applicable sources
@@ -86,3 +98,9 @@ comparable_quote_yield = quoted_comparable ÷ verified applicable sources
 evidence_rate = outcomes with valid source+timestamp+artifact ÷ all outcomes
 duplicate_suppression = routes mapped to existing distinct_rate_source_id
 freshness = % of registry verified during hackathon window
+
+"Verified applicable sources" = MarketRecord rows with status != unresolved.
+market_completion, comparable_quote_yield, and freshness require a registry
+snapshot to compute this denominator; without one they return None (never a
+number derived from the results list alone, which would overstate coverage by
+converging toward 100%).
