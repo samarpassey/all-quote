@@ -41,13 +41,16 @@ Groups and key fields (sensitive ones are vault references, marked †):
 - consent: consent_timestamp, mode ∈ {live_quote, discovery}, permitted_channels,
   excluded_routes, callback_permission, recording_consent
 - identity: legal_name†, preferred_language, date_of_birth†, gender, marital_status
-- contact: email†, mobile†, preferred_callback_window
-- address: street†, unit†, city, province, postal_code†, residence_start_date,
-  is_garaging_location
-- licence: licence_number†, province, class, status, g1_date, g2_date, g_date,
-  first_licensed_date, driver_training_completed
-- vehicle: vin†, model_year, make, model, trim, ownership ∈ {owned, leased},
-  purchase_year_month, lienholder
+- contact: email†, mobile†, preferred_callback_window (optional)
+- address: street†, unit† (optional), city, province, postal_code†,
+  residence_start_date, is_garaging_location
+- licence: licence_number†, province, class, status, g1_date (optional),
+  g2_date (optional), g_date (optional), first_licensed_date (optional),
+  driver_training_completed
+- vehicle: vin† (optional — no vehicle yet is a valid intake state; a
+  fabricated VIN is prohibited by docs/GUARDRAILS.md), model_year, make, model,
+  trim (optional), ownership ∈ {owned, leased}, purchase_year_month,
+  lienholder (optional)
 - use: use_type ∈ {pleasure, commute, business}, commute_km_oneway, annual_km,
   winter_tires, anti_theft
 - history: years_continuously_insured, current_insurer, accidents[] (date, fault_pct,

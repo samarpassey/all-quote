@@ -26,6 +26,8 @@ NOT on how many quotes or how low the rate.
 @docs/ARCHITECTURE.md — read before touching planner, executors, or evidence flow.
 @docs/SCHEMAS.md — single source of truth for all field names and enums.
 @docs/GUARDRAILS.md — hackathon compliance rules; read before writing executor code.
+@docs/DESIGN.md — canonical visual system. Any UI work reads it first. Never
+introduce a colour, typeface, radius or shadow not listed there.
 
 ## Non-negotiable safety rules (hackathon disqualifiers — enforce in code AND review)
 - NEVER write licence numbers, DOB, VIN, full address, or phone into: logs, prompts,

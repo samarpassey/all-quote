@@ -83,7 +83,7 @@ class IntakeIdentity(BaseModel):
 class IntakeContact(BaseModel):
     email: VaultRef
     mobile: VaultRef
-    preferred_callback_window: str
+    preferred_callback_window: str | None = None
 
 
 class IntakeAddress(BaseModel):
@@ -121,7 +121,7 @@ class IntakeLicence(BaseModel):
 
 
 class IntakeVehicle(BaseModel):
-    vin: VaultRef
+    vin: VaultRef | None = None
     model_year: int
     make: str
     model: str
