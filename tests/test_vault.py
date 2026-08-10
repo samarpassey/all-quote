@@ -1,7 +1,9 @@
 import base64
 import hashlib
+import importlib
 import io
 import json
+from unittest import mock
 
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
@@ -172,3 +174,26 @@ def test_cli_delete_all_requires_confirm_flag(tmp_path, monkeypatch, capsys):
     rc = vault.main(["delete-all", "--confirm"])
     assert rc == 0
     assert not (tmp_path / "data" / "vault.enc").exists()
+
+
+@pytest.mark.parametrize("module_name", ["allquote.vault", "allquote.registry", "allquote.intake"])
+def test_import_alone_does_not_load_dotenv(module_name):
+    """CLI invocation (main()) loads .env; a bare `import allquote.X` must
+    not — otherwise `from allquote import X` in a library/test context would
+    silently pull in whatever .env happens to be on disk.
+    """
+    module = importlib.import_module(module_name)
+    try:
+        with mock.patch("dotenv.load_dotenv") as spy:
+            # Reload re-executes the module's top-level code, including its
+            # `from dotenv import load_dotenv` line, so the module's own
+            # `load_dotenv` name rebinds to this patched spy for the
+            # duration of the reload — any import-time call would hit it.
+            importlib.reload(module)
+            assert spy.call_count == 0, (
+                f"{module_name} calls load_dotenv() merely by being imported"
+            )
+    finally:
+        # Re-import for real so later tests get the genuine function back,
+        # not left pointing at the (now-exited) mock.
+        importlib.reload(module)

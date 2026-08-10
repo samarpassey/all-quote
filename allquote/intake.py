@@ -148,13 +148,25 @@ def _group_spec(number: str, key: str, title: str, model: type, demo_critical: b
 GROUP_SPECS: list[dict] = [_group_spec(*d) for d in _GROUP_DEFS]
 
 # `optional_ab_selections` is a free-form dict[str, Literal[...]] in the
-# schema — the *names* of the 13 optional accident benefits aren't derivable
-# from schemas.py, they come from the hackathon brief's Appendix. Left empty
-# pending that list (see conversation) rather than guessed at: getting an
-# Ontario accident-benefit name wrong is the kind of thing GUARDRAILS.md's
-# anti-fabrication stance exists to prevent. Renders as zero rows (harmless)
-# until populated.
-OPTIONAL_AB_BENEFITS: list[tuple[str, str]] = []
+# schema — the 13 optional accident benefit names aren't derivable from
+# schemas.py, they come from the hackathon brief's Appendix. Single source
+# of truth for both the rendered form (via GROUP_SPECS below) and any other
+# code that needs the list — never hand-repeated in the HTML template.
+OPTIONAL_AB_BENEFITS: list[str] = [
+    "income_replacement",
+    "non_earner",
+    "caregiver",
+    "lost_educational_expenses",
+    "expenses_of_visitors",
+    "housekeeping",
+    "damage_to_personal_items",
+    "death",
+    "funeral",
+    "dependant_care",
+    "indexation",
+    "supplementary_medical",
+    "catastrophic",
+]
 
 for _group in GROUP_SPECS:
     if _group["key"] != "coverage_benchmark":
@@ -162,7 +174,9 @@ for _group in GROUP_SPECS:
     for _field in _group["fields"]:
         if _field["name"] == "optional_ab_selections":
             _field["kind"] = "ab-toggle"
-            _field["items"] = [{"key": k, "label": v} for k, v in OPTIONAL_AB_BENEFITS]
+            _field["items"] = [
+                {"key": k, "label": _humanize(k)} for k in OPTIONAL_AB_BENEFITS
+            ]
 
 
 def _spec_to_json() -> list[dict]:

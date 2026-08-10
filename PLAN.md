@@ -6,7 +6,7 @@ Do not start a task until the previous one's criteria pass.
 
 ## Phase 0 — Demo slice (today, before 3 PM)
 
-### Task 1 — Schemas + skeleton
+### Task 1 — Schemas + skeleton — DONE
 Create `allquote/schemas.py` with pydantic models exactly per docs/SCHEMAS.md:
 `Status` enum (13 values), `MarketRecord`, `QuoteResult`, `IntakeProfile` (subset ok
 for today: driver basics, vehicle, address, coverage benchmark). Create package
@@ -14,7 +14,7 @@ skeleton, Makefile, .env.example, pyproject.
 Done when: `make test` passes schema round-trip tests; enum has exactly 13 values
 matching docs/SCHEMAS.md; repo tree matches docs/ARCHITECTURE.md layout.
 
-### Task 2 — Registry seed + store
+### Task 2 — Registry seed + store — DONE
 `allquote/registry.py`: SQLite store; loader that seeds from `data/seed_registry.json`
 (I will paste the 32 groups / 60 entities from the brief's Appendix A). Every row
 gets status `unresolved`, a `distinct_rate_source_id` (null until verified), and
@@ -22,7 +22,7 @@ gets status `unresolved`, a `distinct_rate_source_id` (null until verified), and
 status and distribution_type.
 Done when: seed loads 60 rows; stats command works; export to CSV/JSON works.
 
-### Task 3 — Vault + redaction
+### Task 3 — Vault + redaction — DONE
 `allquote/vault.py`: Fernet-encrypted JSON at `data/vault.enc`, passphrase from
 `VAULT_KEY` env. API: `vault.get(field)` and `vault.inject(callable)` context that
 zeroes references after use. `allquote/redact.py`: `redact_text(str)` (regex: ON
@@ -31,6 +31,12 @@ licence pattern, DOB-like dates, postal codes, VIN pattern, phone) and
 Done when: unit tests prove a licence-shaped string never survives redact_text;
 saving a screenshot without going through redact_image is impossible via the
 evidence API (Task 4 will enforce; here just make redact the only public save path).
+
+Also shipped as part of this task: the intake form surface (`allquote/intake.py`,
+`exports/intake.html`, `python -m allquote.intake serve` / `make intake`) — the
+form described in docs/DESIGN.md §1 that collects IntakeProfile once, routes every
+sensitive field through `vault.put()` on submit, writes a consent receipt, and
+shows a confirmation listing encrypted field NAMES plus `completeness()` by group.
 
 ### Task 4 — Evidence store
 `allquote/evidence.py`: `save_evidence(route_id, kind, payload)` → redacts, writes

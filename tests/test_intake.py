@@ -84,6 +84,16 @@ def test_generated_html_has_five_open_and_four_toggled_sections(tmp_path):
     assert sum(1 for g in spec if not g["demo_critical"]) == 4
 
 
+def test_generated_html_has_all_13_optional_ab_benefit_rows(tmp_path):
+    out = intake.generate(output_path=tmp_path / "intake.html")
+    html = out.read_text()
+
+    assert len(intake.OPTIONAL_AB_BENEFITS) == 13
+    for key in intake.OPTIONAL_AB_BENEFITS:
+        assert key in html, f"{key!r} missing from generated intake.html"
+    assert "July 1, 2026" in html
+
+
 def test_build_profile_from_submission_vaults_sensitive_fields_only(tmp_path):
     vault_path = tmp_path / "vault.enc"
     profile, vaulted = intake.build_profile_from_submission(
@@ -287,6 +297,47 @@ def test_demo_critical_groups_only_submission_validates_and_stores(tmp_path):
     assert stored.use is None
     assert stored.history is None
     assert stored.completeness()["identity"] is True
+
+
+def test_optional_ab_selections_round_trip_into_stored_profile(tmp_path):
+    submitted_ab = {
+        "income_replacement": "included",
+        "non_earner": "excluded",
+        "caregiver": "unavailable",
+        "lost_educational_expenses": "unknown",
+        "expenses_of_visitors": "excluded",
+        "housekeeping": "included",
+        "damage_to_personal_items": "excluded",
+        "death": "excluded",
+        "funeral": "excluded",
+        "dependant_care": "excluded",
+        "indexation": "excluded",
+        "supplementary_medical": "included",
+        "catastrophic": "unknown",
+    }
+    assert set(submitted_ab) == set(intake.OPTIONAL_AB_BENEFITS)
+
+    payload = json.loads(json.dumps(_VALID_PAYLOAD))
+    payload["coverage_benchmark"]["optional_ab_selections"] = submitted_ab
+
+    httpd, thread = _start_server(tmp_path, "test-key-not-real-intake-0011")
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{httpd.server_address[1]}/submit",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            status = resp.status
+    finally:
+        httpd.shutdown()
+        thread.join()
+        httpd.server_close()
+
+    assert status == 200
+    stored = intake.load_profile(path=tmp_path / "profile.json")
+    assert stored.coverage_benchmark.optional_ab_selections == submitted_ab
 
 
 def test_server_never_logs_request_body_even_on_invalid_json(tmp_path, monkeypatch):

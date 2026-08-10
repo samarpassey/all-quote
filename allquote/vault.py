@@ -20,6 +20,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
+from dotenv import load_dotenv
 
 from allquote.schemas import (
     IntakeAddress,
@@ -170,6 +171,7 @@ def _cmd_delete_all(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(prog="python -m allquote.vault")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

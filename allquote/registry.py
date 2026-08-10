@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from allquote.schemas import MarketRecord, Status
 
 DB_PATH = Path("data/allquote.db")
@@ -204,6 +206,7 @@ def verify(
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(prog="python -m allquote.registry")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("load")
