@@ -6,6 +6,7 @@ licence number, VIN, or DOB.
 """
 
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 from allquote.schemas import (
     CoverageBenchmark,
@@ -14,6 +15,8 @@ from allquote.schemas import (
     EvidenceInfo,
     EvidenceRecord,
     IntakeAddress,
+    IntakeContact,
+    IntakeHistory,
     IntakeIdentity,
     IntakeLicence,
     IntakeProfile,
@@ -203,3 +206,57 @@ def build_evidence_record(**overrides) -> EvidenceRecord:
     )
     data.update(overrides)
     return EvidenceRecord(**data)
+
+
+def build_vaulted_profile(
+    vault_path: Path, vault_key: str, **plaintext_overrides: str
+) -> tuple[IntakeProfile, dict[str, str]]:
+    """Build an IntakeProfile whose sensitive fields are real vault-backed
+    VaultRefs (via vault.put), not the bare fake_ref() tokens used elsewhere in
+    this file. For redact.py tests, which need something real to resolve and
+    redact. Returns (profile, plaintext_by_field) so tests can assert the
+    plaintext doesn't survive redaction. All values are obviously fake
+    placeholders, never realistic-looking.
+    """
+    from allquote import vault
+
+    plaintext = dict(
+        legal_name="Fake Testperson",
+        date_of_birth="1990-01-15",
+        email="fake.testperson@example.invalid",
+        mobile="416-555-0100",
+        street="123 Fake Test Street",
+        postal_code="M5V3A8",
+        licence_number="T1234-56789-01234",
+        vin="FAKEVEH0000000001",
+        accidents="Fake fender-bender note, not at fault",
+    )
+    plaintext.update(plaintext_overrides)
+
+    def ref(field_name: str) -> VaultRef:
+        return vault.put(
+            field_name, plaintext[field_name], vault_path=vault_path, vault_key=vault_key
+        )
+
+    identity = build_identity(legal_name=ref("legal_name"), date_of_birth=ref("date_of_birth"))
+    contact = IntakeContact(
+        email=ref("email"), mobile=ref("mobile"), preferred_callback_window="anytime"
+    )
+    address = build_address(street=ref("street"), postal_code=ref("postal_code"))
+    licence = build_licence(licence_number=ref("licence_number"))
+    vehicle = build_vehicle(vin=ref("vin"))
+    history = IntakeHistory(
+        years_continuously_insured=5,
+        current_insurer=None,
+        accidents=[ref("accidents")],
+    )
+
+    profile = build_intake_profile(
+        identity=identity,
+        licence=licence,
+        vehicle=vehicle,
+        address=address,
+        contact=contact,
+        history=history,
+    )
+    return profile, plaintext

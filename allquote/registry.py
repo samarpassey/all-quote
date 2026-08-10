@@ -150,33 +150,57 @@ def export(
         print("run report skipped: Task 12 not implemented yet", file=sys.stderr)
 
 
+def verify_many(
+    registry_ids: list[str],
+    source_url: str,
+    verified_at: datetime | None = None,
+    db_path: Path = DB_PATH,
+) -> list[MarketRecord]:
+    """Stamp last_verified_at (UTC now, unless given) + source_url on one or
+    more registry rows in a single atomic call. Never touches status:
+    verification means "this route exists and I checked it today," not
+    "I got a quote." All-or-nothing — an unknown registry_id raises KeyError
+    and no row is updated.
+    """
+    stamp = verified_at or datetime.now(timezone.utc)
+    conn = _connect(db_path)
+    try:
+        payloads: dict[str, str] = {}
+        missing: list[str] = []
+        for registry_id in registry_ids:
+            row = conn.execute(
+                f"SELECT payload FROM {_TABLE} WHERE registry_id = ?", (registry_id,)
+            ).fetchone()
+            if row is None:
+                missing.append(registry_id)
+            else:
+                payloads[registry_id] = row[0]
+        if missing:
+            raise KeyError(f"no registry row(s) with registry_id in {missing!r}")
+
+        updated = []
+        for registry_id in registry_ids:
+            record = MarketRecord.model_validate_json(payloads[registry_id]).model_copy(
+                update={"source_url": source_url, "last_verified_at": stamp}
+            )
+            conn.execute(
+                f"UPDATE {_TABLE} SET payload = ? WHERE registry_id = ?",
+                (record.model_dump_json(), registry_id),
+            )
+            updated.append(record)
+        conn.commit()
+        return updated
+    finally:
+        conn.close()
+
+
 def verify(
     registry_id: str,
     source_url: str,
     verified_at: datetime | None = None,
     db_path: Path = DB_PATH,
 ) -> MarketRecord:
-    conn = _connect(db_path)
-    try:
-        row = conn.execute(
-            f"SELECT payload FROM {_TABLE} WHERE registry_id = ?", (registry_id,)
-        ).fetchone()
-        if row is None:
-            raise KeyError(f"no registry row with registry_id={registry_id!r}")
-        updated = MarketRecord.model_validate_json(row[0]).model_copy(
-            update={
-                "source_url": source_url,
-                "last_verified_at": verified_at or datetime.now(timezone.utc),
-            }
-        )
-        conn.execute(
-            f"UPDATE {_TABLE} SET payload = ? WHERE registry_id = ?",
-            (updated.model_dump_json(), registry_id),
-        )
-        conn.commit()
-        return updated
-    finally:
-        conn.close()
+    return verify_many([registry_id], source_url, verified_at=verified_at, db_path=db_path)[0]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -187,7 +211,9 @@ def main(argv: list[str] | None = None) -> int:
     export_parser = subparsers.add_parser("export")
     export_parser.add_argument("--with-report", action="store_true")
     verify_parser = subparsers.add_parser("verify")
-    verify_parser.add_argument("--registry-id", required=True)
+    verify_parser.add_argument(
+        "--registry-id", required=True, nargs="+", help="one or more registry_id values"
+    )
     verify_parser.add_argument("--source-url", required=True)
 
     args = parser.parse_args(argv)
@@ -198,7 +224,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "export":
         export(with_report=args.with_report)
     elif args.command == "verify":
-        print(verify(args.registry_id, args.source_url).model_dump_json(indent=2))
+        updated = verify_many(args.registry_id, args.source_url)
+        for record in updated:
+            print(record.model_dump_json(indent=2))
+        print(
+            f"verified {len(updated)} route(s) at "
+            f"{updated[0].last_verified_at.isoformat()} (status unchanged)",
+            file=sys.stderr,
+        )
     return 0
 
 

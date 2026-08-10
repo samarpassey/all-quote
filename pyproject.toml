@@ -9,7 +9,6 @@ dependencies = [
     "playwright>=1.62",    # Task 5 - browser automation runtime
     "cryptography>=50",    # Task 3 - Fernet vault
     "pillow>=12",           # Task 3 - redact.py image redaction
-    "streamlit>=1.61",      # Task 6 - dashboard
 ]
 
 [dependency-groups]

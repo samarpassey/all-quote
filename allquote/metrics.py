@@ -4,7 +4,10 @@ Definitions follow docs/SCHEMAS.md's "Metrics" section. `market_completion`,
 `comparable_quote_yield`, and `freshness` require an explicit registry snapshot
 to compute a denominator ("verified applicable sources") — without one they
 return None rather than a number derived from the results list alone, which
-would converge to ~100% by construction and overstate coverage.
+would converge to ~100% by construction and overstate coverage. The same
+denominator can legitimately be zero (nothing in the registry has left
+`unresolved` yet); 0/0 has no meaningful ratio, so that also returns None
+rather than a misleading 0.0.
 """
 
 from datetime import datetime, timezone
@@ -28,7 +31,7 @@ def market_completion(
         return None
     denominator = len(_verified_applicable(registry))
     if denominator == 0:
-        return 0.0
+        return None
     numerator = sum(
         1
         for r in results
@@ -44,7 +47,7 @@ def comparable_quote_yield(
         return None
     denominator = len(_verified_applicable(registry))
     if denominator == 0:
-        return 0.0
+        return None
     numerator = sum(1 for r in results if r.outcome.status == Status.QUOTED_COMPARABLE)
     return numerator / denominator
 
@@ -77,7 +80,7 @@ def freshness(
     applicable = _verified_applicable(registry)
     denominator = len(applicable)
     if denominator == 0:
-        return 0.0
+        return None
     start, end = window
     numerator = sum(
         1 for r in applicable if r.last_verified_at is not None and start <= r.last_verified_at <= end

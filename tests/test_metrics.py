@@ -67,6 +67,19 @@ def test_market_completion_comparable_yield_freshness_none_without_registry():
     assert freshness(SIX_RESULTS, registry=None) is None
 
 
+def test_market_completion_comparable_yield_freshness_none_when_nothing_verified():
+    # Every row still unresolved: the "verified applicable sources" denominator
+    # is 0. 0/0 has no meaningful ratio, so this must read as not-computable
+    # (None), never as a misleading 0.0.
+    registry = [
+        build_market_record(registry_id=f"unresolved-{i}", status=Status.UNRESOLVED)
+        for i in range(5)
+    ]
+    assert market_completion([], registry=registry) is None
+    assert comparable_quote_yield([], registry=registry) is None
+    assert freshness([], registry=registry) is None
+
+
 def test_market_completion_uses_registry_denominator_not_results_length():
     # 60-row registry: 57 rows already resolved/curated (non-unresolved), 3 still
     # unresolved. Only 3 QuoteResults exist so far. A results-only denominator

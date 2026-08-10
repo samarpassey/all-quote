@@ -79,3 +79,11 @@ Works only for the participant's own insurance shopping.
 
 - (fill during build: routes needing membership, human, or licensed intermediary;
   sites blocked by terms; panels unverified; telephony not production-compliant)
+- Shape-based text redaction (licence/VIN/postal-code/phone/DOB patterns in
+  redact.py) is regex-based, not exhaustive. It can over-redact a benign
+  look-alike string (e.g. an unrelated 17-character code, or a non-DOB date) —
+  an accepted tradeoff; the failure mode is always over-redaction, never a
+  sensitive value surviving.
+- The vault's Fernet key (vault.py) is derived from `VAULT_KEY` via a single
+  SHA-256 pass, not a proper password-KDF (PBKDF2/scrypt). Acceptable for a
+  personal single-user hackathon vault; not production-grade key derivation.

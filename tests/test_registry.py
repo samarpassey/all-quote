@@ -126,3 +126,56 @@ def test_verify_unknown_registry_id_raises(tmp_path):
 
     with pytest.raises(KeyError):
         registry.verify("does-not-exist", "https://example.invalid", db_path=db_path)
+
+
+def test_verify_does_not_change_status(tmp_path):
+    seed_path = _write_seed(tmp_path)
+    db_path = tmp_path / "allquote.db"
+    registry.load_seed(seed_path=seed_path, db_path=db_path)
+
+    updated = registry.verify(
+        "direct-testco", "https://example.invalid/verified", db_path=db_path
+    )
+    assert updated.status == Status.UNRESOLVED
+
+
+def test_verify_many_stamps_all_given_ids(tmp_path):
+    seed_path = _write_seed(tmp_path)
+    db_path = tmp_path / "allquote.db"
+    registry.load_seed(seed_path=seed_path, db_path=db_path)
+
+    fixed_time = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    updated = registry.verify_many(
+        ["direct-testco", "broker-testco", "agg-panel"],
+        "https://example.invalid/verified",
+        verified_at=fixed_time,
+        db_path=db_path,
+    )
+
+    assert [r.registry_id for r in updated] == ["direct-testco", "broker-testco", "agg-panel"]
+    assert all(r.source_url == "https://example.invalid/verified" for r in updated)
+    assert all(r.last_verified_at == fixed_time for r in updated)
+    assert all(r.status == Status.UNRESOLVED for r in updated)
+
+    records = {r.registry_id: r for r in registry.list_records(db_path=db_path)}
+    assert records["direct-testco"].last_verified_at == fixed_time
+    assert records["broker-testco"].last_verified_at == fixed_time
+    assert records["agg-panel"].last_verified_at == fixed_time
+
+
+def test_verify_many_is_atomic_on_unknown_id(tmp_path):
+    seed_path = _write_seed(tmp_path)
+    db_path = tmp_path / "allquote.db"
+    registry.load_seed(seed_path=seed_path, db_path=db_path)
+
+    with pytest.raises(KeyError):
+        registry.verify_many(
+            ["direct-testco", "does-not-exist"],
+            "https://example.invalid/verified",
+            db_path=db_path,
+        )
+
+    # direct-testco must NOT have been stamped: an unknown id anywhere in the
+    # batch aborts the whole call, never a partial write.
+    records = {r.registry_id: r for r in registry.list_records(db_path=db_path)}
+    assert records["direct-testco"].last_verified_at is None

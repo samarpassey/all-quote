@@ -11,7 +11,7 @@ run:
 	uv run --no-sync python -m allquote.planner run --route $(ROUTE)
 
 dashboard:
-	uv run --no-sync streamlit run allquote/dashboard.py
+	uv run --no-sync python -m allquote.dashboard
 
 export-registry:
 	uv run --no-sync python -m allquote.registry export
