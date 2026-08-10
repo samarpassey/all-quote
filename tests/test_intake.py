@@ -12,9 +12,9 @@ from allquote import intake
 _VALID_PAYLOAD = {
     "identity": {
         "legal_name": "Fake Testperson",
-        "preferred_language": "en",
+        "preferred_language": "english",
         "date_of_birth": "1990-01-15",
-        "gender": "unspecified",
+        "gender": "prefer_not_to_say",
         "marital_status": "single",
     },
     "licence": {

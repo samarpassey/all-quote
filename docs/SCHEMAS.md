@@ -40,24 +40,34 @@ Groups and key fields (sensitive ones are vault references, marked †):
 
 - consent: consent_timestamp, mode ∈ {live_quote, discovery}, permitted_channels,
   excluded_routes, callback_permission, recording_consent
-- identity: legal_name†, preferred_language, date_of_birth†, gender, marital_status
+- identity: legal_name†, preferred_language ∈ {english, french}, date_of_birth†,
+  gender ∈ {male, female, X, prefer_not_to_say},
+  marital_status ∈ {single, married, common_law, separated, divorced, widowed}
 - contact: email†, mobile†, preferred_callback_window (optional)
-- address: street†, unit† (optional), city, province, postal_code†,
+- address: street†, unit† (optional), city, province ∈ Province, postal_code†,
   residence_start_date, is_garaging_location
-- licence: licence_number†, province, class, status, g1_date (optional),
+- licence: licence_number†, province ∈ Province,
+  class ∈ {G1, G2, G, M1, M2, M, A, B, C, D, E, F, other},
+  status ∈ {valid, suspended, expired, cancelled}, g1_date (optional),
   g2_date (optional), g_date (optional), first_licensed_date (optional),
   driver_training_completed
 - vehicle: vin† (optional — no vehicle yet is a valid intake state; a
-  fabricated VIN is prohibited by docs/GUARDRAILS.md), model_year, make, model,
-  trim (optional), ownership ∈ {owned, leased}, purchase_year_month,
-  lienholder (optional)
-- use: use_type ∈ {pleasure, commute, business}, commute_km_oneway, annual_km,
-  winter_tires, anti_theft
+  fabricated VIN is prohibited by docs/GUARDRAILS.md), model_year (int, 1900–2027),
+  make, model, trim (optional), ownership ∈ {owned, leased},
+  purchase_year_month (YYYY-MM, e.g. "2022-06"), lienholder (optional)
+- use: use_type ∈ {pleasure, commute, business, farm, commercial},
+  commute_km_oneway, annual_km, winter_tires, anti_theft
 - history: years_continuously_insured, current_insurer, accidents[] (date, fault_pct,
   amount), convictions[] (date, description), suspensions[], cancellations[]
-- coverage_benchmark: effective_date, liability_limit, dcpd_included,
-  collision_deductible, comprehensive_deductible, endorsements
+- coverage_benchmark: effective_date,
+  liability_limit ∈ {200000, 500000, 1000000, 2000000}, dcpd_included,
+  collision_deductible ∈ {0, 250, 500, 1000, 2500},
+  comprehensive_deductible ∈ {0, 250, 500, 1000, 2500}, endorsements
   (opcf_20, opcf_27, opcf_43, opcf_44r), optional_ab_selections{}, telematics_opt_in
+
+Province ∈ {ON, AB, BC, MB, NB, NL, NS, NT, NU, PE, QC, SK, YT} (ON first, then
+the remaining 12 provinces and territories alphabetically by abbreviation) —
+shared by licence.province and address.province.
 
 Demo benchmark default: $2M liability, DCPD included, mandatory med/rehab/attendant
 AB, collision + comprehensive $1,000 deductibles, OPCF 44R, no telematics.

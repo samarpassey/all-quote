@@ -62,6 +62,12 @@ def sensitive_fields(model: type[BaseModel]) -> frozenset[str]:
 
 FSA_PATTERN = re.compile(r"^[A-Za-z]\d[A-Za-z]$")
 
+# ON first (the applicant's own province), then the remaining 12 provinces
+# and territories alphabetically by postal abbreviation.
+Province = Literal[
+    "ON", "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "PE", "QC", "SK", "YT"
+]
+
 
 class IntakeConsent(BaseModel):
     consent_timestamp: datetime
@@ -72,12 +78,19 @@ class IntakeConsent(BaseModel):
     recording_consent: bool
 
 
+PreferredLanguage = Literal["english", "french"]
+Gender = Literal["male", "female", "X", "prefer_not_to_say"]
+MaritalStatus = Literal[
+    "single", "married", "common_law", "separated", "divorced", "widowed"
+]
+
+
 class IntakeIdentity(BaseModel):
     legal_name: VaultRef
-    preferred_language: str
+    preferred_language: PreferredLanguage
     date_of_birth: VaultRef
-    gender: str
-    marital_status: str
+    gender: Gender
+    marital_status: MaritalStatus
 
 
 class IntakeContact(BaseModel):
@@ -90,7 +103,7 @@ class IntakeAddress(BaseModel):
     street: VaultRef
     unit: VaultRef | None = None
     city: str
-    province: str
+    province: Province
     postal_code: VaultRef
     fsa: str
     residence_start_date: date
@@ -106,13 +119,19 @@ class IntakeAddress(BaseModel):
         return v.upper()
 
 
+LicenceClass = Literal[
+    "G1", "G2", "G", "M1", "M2", "M", "A", "B", "C", "D", "E", "F", "other"
+]
+LicenceStatus = Literal["valid", "suspended", "expired", "cancelled"]
+
+
 class IntakeLicence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     licence_number: VaultRef
-    province: str
-    class_: str = Field(alias="class")
-    status: str
+    province: Province
+    class_: LicenceClass = Field(alias="class")
+    status: LicenceStatus
     g1_date: date | None = None
     g2_date: date | None = None
     g_date: date | None = None
@@ -120,9 +139,12 @@ class IntakeLicence(BaseModel):
     driver_training_completed: bool
 
 
+YEAR_MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
 class IntakeVehicle(BaseModel):
     vin: VaultRef | None = None
-    model_year: int
+    model_year: int = Field(ge=1900, le=2027)
     make: str
     model: str
     trim: str | None = None
@@ -130,9 +152,19 @@ class IntakeVehicle(BaseModel):
     purchase_year_month: str
     lienholder: str | None = None
 
+    @field_validator("purchase_year_month")
+    @classmethod
+    def _validate_purchase_year_month(cls, v: str) -> str:
+        if not YEAR_MONTH_PATTERN.match(v):
+            raise ValueError("purchase_year_month must be YYYY-MM, e.g. '2022-06'")
+        return v
+
+
+UseType = Literal["pleasure", "commute", "business", "farm", "commercial"]
+
 
 class IntakeUse(BaseModel):
-    use_type: Literal["pleasure", "commute", "business"]
+    use_type: UseType
     commute_km_oneway: float | None = None
     annual_km: int
     winter_tires: bool
@@ -148,12 +180,16 @@ class IntakeHistory(BaseModel):
     cancellations: list[VaultRef] = Field(default_factory=list)
 
 
+LiabilityLimit = Literal[200_000, 500_000, 1_000_000, 2_000_000]
+Deductible = Literal[0, 250, 500, 1000, 2500]
+
+
 class CoverageBenchmark(BaseModel):
     effective_date: date
-    liability_limit: int
+    liability_limit: LiabilityLimit
     dcpd_included: bool
-    collision_deductible: int
-    comprehensive_deductible: int
+    collision_deductible: Deductible
+    comprehensive_deductible: Deductible
     endorsements: list[Literal["opcf_20", "opcf_27", "opcf_43", "opcf_44r"]] = Field(
         default_factory=list
     )

@@ -112,6 +112,20 @@ def _field_kind(annotation: Any) -> tuple[str, list[Any] | None]:
     return "text", None
 
 
+def _numeric_bounds(info: Any) -> tuple[float | None, float | None]:
+    lo = hi = None
+    for constraint in info.metadata:
+        if hasattr(constraint, "ge"):
+            lo = constraint.ge
+        elif hasattr(constraint, "gt"):
+            lo = constraint.gt
+        elif hasattr(constraint, "le"):
+            hi = constraint.le
+        elif hasattr(constraint, "lt"):
+            hi = constraint.lt
+    return lo, hi
+
+
 def _group_spec(number: str, key: str, title: str, model: type, demo_critical: bool) -> dict:
     sensitive_names = sensitive_fields(model)
     fields = []
@@ -124,6 +138,17 @@ def _group_spec(number: str, key: str, title: str, model: type, demo_critical: b
         # default), so the server side defaults it explicitly; see
         # _extract_group_kwargs.
         required = info.is_required() and kind != "checkbox"
+        # A select whose Literal members are numbers (e.g. liability_limit,
+        # the deductibles) must round-trip as JSON numbers, not strings — the
+        # client casts using this flag.
+        options_type = (
+            "number"
+            if kind == "select" and options and all(isinstance(o, (int, float)) for o in options)
+            else None
+        )
+        min_value = max_value = None
+        if kind == "number":
+            min_value, max_value = _numeric_bounds(info)
         fields.append(
             {
                 "name": name,
@@ -133,6 +158,9 @@ def _group_spec(number: str, key: str, title: str, model: type, demo_critical: b
                 "required": required,
                 "sensitive": name in sensitive_names,
                 "options": options,
+                "optionsType": options_type,
+                "min": min_value,
+                "max": max_value,
             }
         )
     return {
@@ -146,6 +174,31 @@ def _group_spec(number: str, key: str, title: str, model: type, demo_critical: b
 
 
 GROUP_SPECS: list[dict] = [_group_spec(*d) for d in _GROUP_DEFS]
+
+# `date_of_birth` is a VaultRef in schemas.py (it's sensitive, so the schema
+# only records that it's *vaulted*, not its shape) and so came out of
+# _group_spec as a free-text field like the other sensitive strings. It's a
+# calendar date like any other date field in this form — render it as one.
+# Bounds aren't derivable from the schema either (VaultRef carries no date
+# semantics at the type level): no one alive was born before 1900, and a
+# birth date can't be in the future.
+for _group in GROUP_SPECS:
+    for _field in _group["fields"]:
+        if _field["name"] == "date_of_birth":
+            _field["kind"] = "date"
+            _field["min"] = "1900-01-01"
+            _field["max"] = date.today().isoformat()
+
+# `purchase_year_month` is a plain `str` in schemas.py, constrained to YYYY-MM
+# by IntakeVehicle's own validator rather than by the type system (there's no
+# stdlib year-month type) — so, like date_of_birth above, it comes out of
+# _group_spec as free text. Render it with the matching native picker instead.
+for _group in GROUP_SPECS:
+    for _field in _group["fields"]:
+        if _field["name"] == "purchase_year_month":
+            _field["kind"] = "month"
+            _field["min"] = "1900-01"
+            _field["max"] = "2027-12"
 
 # `optional_ab_selections` is a free-form dict[str, Literal[...]] in the
 # schema — the 13 optional accident benefit names aren't derivable from
@@ -703,6 +756,7 @@ button { font-family: inherit; }
 .field-row input[type="text"],
 .field-row input[type="number"],
 .field-row input[type="date"],
+.field-row input[type="month"],
 .field-row select,
 .field-row textarea {
   display: block;
@@ -723,6 +777,7 @@ button { font-family: inherit; }
 .field-row input[type="text"]:focus,
 .field-row input[type="number"]:focus,
 .field-row input[type="date"]:focus,
+.field-row input[type="month"]:focus,
 .field-row select:focus,
 .field-row textarea:focus {
   outline: none;
@@ -796,6 +851,7 @@ button { font-family: inherit; }
 .field-row.has-error input[type="text"],
 .field-row.has-error input[type="number"],
 .field-row.has-error input[type="date"],
+.field-row.has-error input[type="month"],
 .field-row.has-error select {
   border-bottom-color: var(--accent);
 }
@@ -997,9 +1053,13 @@ section.block > h2 {
     } else if (field.kind === "list-text") {
       control = '<textarea id="' + id + '" rows="3" placeholder="one per line"></textarea>';
     } else if (field.kind === "number") {
-      control = '<input type="number" step="any" id="' + id + '"' + (field.required ? " required" : "") + '>';
-    } else if (field.kind === "date") {
-      control = '<input type="date" id="' + id + '"' + (field.required ? " required" : "") + '>';
+      var bounds = (field.min !== null && field.min !== undefined ? ' min="' + field.min + '"' : "") +
+        (field.max !== null && field.max !== undefined ? ' max="' + field.max + '"' : "");
+      control = '<input type="number" step="any" id="' + id + '"' + bounds + (field.required ? " required" : "") + '>';
+    } else if (field.kind === "date" || field.kind === "month") {
+      var dateBounds = (field.min !== null && field.min !== undefined ? ' min="' + field.min + '"' : "") +
+        (field.max !== null && field.max !== undefined ? ' max="' + field.max + '"' : "");
+      control = '<input type="' + field.kind + '" id="' + id + '"' + dateBounds + (field.required ? " required" : "") + '>';
     } else {
       control = '<input type="text" autocomplete="off" id="' + id + '"' + (field.required ? " required" : "") + '>';
     }
@@ -1085,7 +1145,8 @@ section.block > h2 {
 
     var input = document.getElementById(id);
     if (input.value === "") return undefined;
-    return field.kind === "number" ? Number(input.value) : input.value;
+    var isNumeric = field.kind === "number" || field.optionsType === "number";
+    return isNumeric ? Number(input.value) : input.value;
   }
 
   function collectPayload() {
@@ -1114,6 +1175,7 @@ section.block > h2 {
   function requiredMessage(field) {
     if (field.kind === "select") return "choose " + field.label.toLowerCase();
     if (field.kind === "date") return field.label.toLowerCase() + " needs a date";
+    if (field.kind === "month") return field.label.toLowerCase() + " needs a month, like 2022-06";
     return field.label.toLowerCase() + " needs a value";
   }
 

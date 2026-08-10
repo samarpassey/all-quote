@@ -39,9 +39,9 @@ def fake_ref(label: str) -> VaultRef:
 def build_identity(**overrides) -> IntakeIdentity:
     data = dict(
         legal_name=fake_ref("legal-name"),
-        preferred_language="en",
+        preferred_language="english",
         date_of_birth=fake_ref("dob"),
-        gender="unspecified",
+        gender="prefer_not_to_say",
         marital_status="single",
     )
     data.update(overrides)
