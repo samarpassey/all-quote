@@ -251,6 +251,75 @@ def test_gate_reason_has_caveat_when_matched_text_cannot_be_located(
     assert "may not show this text" in result.outcome.failure_reason
 
 
+# --- stale gate hit: final status must reflect the page the run ended on --
+#
+# End-to-end reproduction of the sonnet.ca incident through the real
+# run_route() pipeline: the driver walks the browser through repro_page_a
+# (a genuine but early consent gate, plus a footer red herring) then two
+# benign filler pages, then repro_page_b3 (its own, different, genuine
+# identity_verification gate) -- exactly "the agent kept stepping" after the
+# first hit. The reported QuoteResult must describe B3's gate, never A's.
+
+
+def test_final_status_reflects_the_page_the_run_ended_on_not_a_stale_earlier_hit(
+    tmp_path, fixture_server, market_record, vaulted_profile
+):
+    record, db_path = market_record
+    profile, _, vault_path = vaulted_profile
+
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+        agent_box.append(_FakeAgent())
+
+        # Step 1: target_url is repro_page_a.html (run_route already
+        # navigated there before calling this driver) -- its genuine
+        # in-flow consent checkbox gates.
+        await _tick_hook(hook, target_url, browser_session)
+
+        page = await browser_session.must_get_current_page()
+
+        # Steps 2-5: the agent keeps going anyway, through two benign pages.
+        for step, name in ((2, "repro_page_b1.html"), (4, "repro_page_b2.html")):
+            url = fixture_server.url_for(name)
+            await page.goto(url)
+            await _wait_until_ready(browser_session)
+            await hook(SimpleNamespace(url=url), None, step)  # transition step, skipped
+            await hook(SimpleNamespace(url=url), None, step + 1)  # settled, clean page
+
+        # Steps 6-7: repro_page_b3.html has its own, different, genuine
+        # gate (identity_verification) -- this is where the run actually
+        # ends.
+        url_b3 = fixture_server.url_for("repro_page_b3.html")
+        await page.goto(url_b3)
+        await _wait_until_ready(browser_session)
+        await hook(SimpleNamespace(url=url_b3), None, 6)  # transition step, skipped
+        await hook(SimpleNamespace(url=url_b3), None, 7)  # settled: B3's own gate fires
+
+        return AttemptOutcome(ended_via="budget", final_result=None, steps_used=7)
+
+    async def body():
+        return await executor.run_route(
+            record.registry_id,
+            profile,
+            live=False,
+            fixture_url=fixture_server.url_for("repro_page_a.html"),
+            max_steps=10,
+            timeout_s=10,
+            vault_path=vault_path,
+            vault_key="test-key",
+            db_path=db_path,
+            evidence_root=tmp_path / "evidence",
+            agent_runner=driver,
+        )
+
+    result = _run(body())
+    # identity_verification and consent_or_terms_required both map to
+    # MANUAL_HANDOFF, so the status alone can't distinguish them -- the
+    # reason text is the proof that this is B3's gate, not A's stale one.
+    assert result.outcome.status == Status.MANUAL_HANDOFF
+    assert "identity_verification" in result.outcome.failure_reason
+    assert "consent_or_terms_required" not in result.outcome.failure_reason
+
+
 # --- success path -------------------------------------------------------------
 
 

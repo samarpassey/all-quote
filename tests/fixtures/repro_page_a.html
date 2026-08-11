@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head><title>Province selection</title></head>
+<body>
+  <h1>Before we continue</h1>
+  <form>
+    <label><input type="checkbox" id="consent_checkbox"> I consent to a credit check</label>
+    <button type="button" id="continue" disabled>Continue</button>
+  </form>
+
+  <!-- Unrelated cross-sell fine print, the same shape as the real
+       Tangerine-footer false positive -- must never gate on its own
+       (active-region scoping excludes it). Present here only to match the
+       real-world shape of the bug report. -->
+  <footer>
+    <p class="fine-print">
+      Special offer: Applicants must apply for the Tangerine Credit Card and
+      must consent to a credit check to be eligible for this promotion.
+    </p>
+    <p>&copy; 2026 Example Insurance Co.</p>
+  </footer>
+</body>
+</html>

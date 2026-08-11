@@ -1009,6 +1009,79 @@ def _box_is_entirely_black(img: Image.Image, box: tuple[int, int, int, int]) -> 
     )
 
 
+# --- stale gate hit: a hit recorded on one page must not survive silently --
+# --- across navigation to a completely different page (the sonnet.ca run  --
+# --- that reached step 8 with a step-6-shaped stale reason and a          --
+# --- mismatched screenshot). repro_page_a.html carries a footer red       --
+# --- herring (already excluded by active-region scoping) plus a genuine   --
+# --- in-flow consent checkbox that DOES gate; repro_page_b1/b2.html are   --
+# --- benign filler steps (the "several more steps" the agent actually     --
+# --- took); repro_page_b3.html carries its own, different, genuine gate   --
+# --- (identity_verification) that must be detected fresh, not swallowed   --
+# --- by the stale hit from page A.
+
+
+def test_stale_gate_hit_discarded_after_navigation_and_fresh_gate_detected(fixture_server, tmp_path):
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            url_a = fixture_server.url_for("repro_page_a.html")
+            url_b1 = fixture_server.url_for("repro_page_b1.html")
+            url_b2 = fixture_server.url_for("repro_page_b2.html")
+            url_b3 = fixture_server.url_for("repro_page_b3.html")
+
+            gate_box: list[gates.GateHit] = []
+            agent_box = [_FakeAgent()]
+            hook = browser_ops.make_step_hook(
+                profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+            )
+
+            # Step 1: page A's genuine in-flow consent checkbox gates.
+            await page.goto(url_a)
+            await _wait_until_ready(session)
+            await hook(_StateStub(url_a), None, 1)
+            assert len(gate_box) == 1
+            assert gate_box[0].kind == "consent_or_terms_required"
+            assert gate_box[0].url == url_a
+            assert agent_box[0].stop_calls == 1
+
+            # Steps 2-5: the agent keeps stepping anyway (simulating the
+            # production symptom) through two benign pages. The stale hit
+            # must be discarded the moment the url no longer matches it —
+            # not carried forward as if it still described the current page.
+            await page.goto(url_b1)
+            await _wait_until_ready(session)
+            await hook(_StateStub(url_b1), None, 2)  # transition step, skipped
+            await hook(_StateStub(url_b1), None, 3)  # settled: stale hit discarded, page is clean
+            assert gate_box == []
+
+            await page.goto(url_b2)
+            await _wait_until_ready(session)
+            await hook(_StateStub(url_b2), None, 4)  # transition step, skipped
+            await hook(_StateStub(url_b2), None, 5)  # settled: still clean
+            assert gate_box == []
+
+            # Step 6-7: page B3 has its OWN, different, genuine gate. It
+            # must be detected fresh, not suppressed by anything left over
+            # from page A.
+            await page.goto(url_b3)
+            await _wait_until_ready(session)
+            await hook(_StateStub(url_b3), None, 6)  # transition step, skipped
+            await hook(_StateStub(url_b3), None, 7)  # settled: detects B3's own gate
+            assert len(gate_box) == 1
+            assert gate_box[0].kind == "identity_verification"
+            assert gate_box[0].url == url_b3
+            assert gate_box[0].step_number == 7
+            assert agent_box[0].stop_calls == 2  # once for A's hit, once for B3's
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
 # --- no off-localhost / no LLM calls ----------------------------------------
 
 

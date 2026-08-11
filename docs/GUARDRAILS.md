@@ -101,3 +101,12 @@ Works only for the participant's own insurance shopping.
   the resolve-at-fill-time design for a narrow, low-probability edge case
   (this executor never auto-fills from a prior session, and always fills
   fields itself).
+- Gate detection currently requires consent prose and a blocking control to
+  be present in the same active region, but does not require them to be in
+  the same sub-container. On sonnet.ca's quote flow, unrelated partner
+  promotional fine print in the page footer co-occurs with the form's own
+  required control, producing a consent_or_terms_required status whose
+  reason string cites text that is not the actual gate. The terminal status
+  and evidence artifact are correct for the page reached; the reason string
+  is imprecise. Tightening this requires matching prose and control within
+  the same DOM subtree.

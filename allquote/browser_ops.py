@@ -64,6 +64,7 @@ API calls — see tests/test_browser_ops.py):
 """
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -486,6 +487,24 @@ async def scroll_text_into_view(browser_session: BrowserSession, needle: str) ->
     return bool(result.get("found")) if result else False
 
 
+async def get_current_url(browser_session: BrowserSession) -> str | None:
+    """Best-effort: the URL of whatever page the browser is CURRENTLY on.
+
+    Used by allquote.executor at end-of-run to confirm a recorded GateHit's
+    `.url` still matches the page the run actually ended on before trusting
+    it — never raises; a dead/closed session or a failed evaluate() returns
+    None, and the caller must treat that as "cannot confirm", not as a
+    match (see executor.py's stale-hit discard: fail closed, never report a
+    gate detected on a page the run wasn't on when it stopped).
+    """
+    try:
+        page = await browser_session.must_get_current_page()
+        raw = await page.evaluate("() => window.location.href")
+        return raw if isinstance(raw, str) else None
+    except Exception:
+        return None
+
+
 # --- deterministic gate step hook -------------------------------------------
 #
 # A byte-identical evidence screenshot across separate runs turned out to be
@@ -505,6 +524,18 @@ async def scroll_text_into_view(browser_session: BrowserSession, needle: str) ->
 
 _PAGE_STATE_JS = "() => ({ url: window.location.href, readyState: document.readyState })"
 
+# --- TEMPORARY diagnostic instrumentation (remove once the stale-gate-hit
+# investigation is closed) -- gated by an env var so it's a no-op in normal
+# runs and in the existing test suite. Prints one line per step: step
+# number, url, whether detection was skipped and why, and whether a GateHit
+# was recorded on this call.
+_GATE_DEBUG = bool(os.environ.get("ALLQUOTE_GATE_DEBUG"))
+
+
+def _gate_debug(step_number: int, url: str, note: str) -> None:
+    if _GATE_DEBUG:
+        print(f"[gate_debug] step={step_number} url={url!r} {note}", flush=True)
+
 
 def make_step_hook(
     profile: IntakeProfile,
@@ -519,10 +550,23 @@ def make_step_hook(
 
     Runs `gates.detect()` on every step using stable Playwright/CDP text
     extraction (never browser-use's internal DOM serializer — see module
-    docstring point 2). First hit wins: once `gate_box` is populated the hook
-    is a no-op, and `agent.stop()` (via `agent_box`, populated by the caller
-    right after `Agent(...)` construction) is called exactly once — the LLM
-    never decides whether to proceed past a gate.
+    docstring point 2). `gate_box` holds at most one entry, but "first hit
+    wins" no longer means "first hit forever": a recorded GateHit carries
+    the URL and step number it was detected on (see `gates.GateHit.url` /
+    `.step_number`), and is only a no-op reason to skip THIS step if the
+    current URL still matches it — nothing new to learn about a page we've
+    already recorded. If the URL has since changed, that old hit describes a
+    page the browser is no longer on; it is discarded (not trusted) and
+    detection runs fresh against whatever page is current now. This is what
+    stops a hit from becoming permanently sticky and blind to every
+    subsequent page regardless of what's actually on it — the bug behind a
+    stale hit surviving multiple real page transitions and being reported
+    with a screenshot of a page it was never observed on. `agent.stop()`
+    (via `agent_box`, populated by the caller right after `Agent(...)`
+    construction) is called every time a hit is freshly recorded — once for
+    the original hit, and again if a later, different page produces its own
+    — never on a step that's merely re-confirming an already-recorded hit.
+    The LLM never decides whether to proceed past a gate.
 
     `vault_path`/`vault_key` are needed here because redacting the evidence
     snippet (`redact_text`) resolves every sensitive field on `profile` to
@@ -531,13 +575,38 @@ def make_step_hook(
     """
 
     previous_url: str | None = None
+    # TEMPORARY (see _GATE_DEBUG above): the step agent.stop() was last
+    # called at, so every step processed afterward is visible in the log —
+    # if the real agent keeps stepping well past a halt, that's a second,
+    # separate bug this makes visible instead of masking.
+    stop_called_at_step: int | None = None
 
     async def _step_hook(browser_state_summary: Any, agent_output: Any, step_number: int) -> None:
-        nonlocal previous_url
-        if gate_box:
-            return
-
+        nonlocal previous_url, stop_called_at_step
         url = getattr(browser_state_summary, "url", "")
+
+        if stop_called_at_step is not None:
+            _gate_debug(
+                step_number,
+                url,
+                f"NOTE: agent.stop() was called at step {stop_called_at_step} "
+                f"({step_number - stop_called_at_step} step(s) ago) — still being asked to process step {step_number}",
+            )
+
+        if gate_box:
+            recorded = gate_box[0]
+            if recorded.url == url:
+                _gate_debug(
+                    step_number, url, f"skipped: hit already recorded on this url (kind={recorded.kind!r})"
+                )
+                return
+            _gate_debug(
+                step_number,
+                url,
+                f"stale hit discarded: recorded at step={recorded.step_number} url={recorded.url!r} "
+                f"kind={recorded.kind!r} — current url differs, re-detecting fresh",
+            )
+            gate_box.clear()
 
         # (1) A navigation was observed since the last step -- reading the
         # DOM right now risks landing on the outgoing page while the new
@@ -548,13 +617,15 @@ def make_step_hook(
         navigated_since_last_step = previous_url is not None and url != previous_url
         previous_url = url
         if navigated_since_last_step:
+            _gate_debug(step_number, url, "skipped: navigated_since_last_step (transition step)")
             return
 
         try:
             page = await browser_session.must_get_current_page()
             raw_page_state = await page.evaluate(_PAGE_STATE_JS)
             page_state = json.loads(raw_page_state) if isinstance(raw_page_state, str) else raw_page_state
-        except Exception:
+        except Exception as exc:
+            _gate_debug(step_number, url, f"skipped: page_state evaluate() raised {type(exc).__name__}: {exc}")
             return
 
         live_url = (page_state or {}).get("url", "")
@@ -565,6 +636,7 @@ def make_step_hook(
         # still disagree (each was captured at a slightly different time) —
         # that's navigation in flight too, caught independently of (1).
         if live_url != url:
+            _gate_debug(step_number, url, f"skipped: live_url {live_url!r} != browser_state_summary.url {url!r}")
             return
 
         if ready_state != "complete":
@@ -572,6 +644,7 @@ def make_step_hook(
             # not just CAPTCHA — a modal not yet attached, a script not yet
             # run, a partially-parsed body. Skip this step; the callback
             # fires again on the next step once the page has settled.
+            _gate_debug(step_number, url, f"skipped: readyState={ready_state!r} != complete")
             return
 
         region = await scan_active_region(page)
@@ -584,12 +657,14 @@ def make_step_hook(
             # boilerplate the shell has already server-rendered (a footer's
             # promo text, in the case this guards against). The next step
             # re-checks once the page has actually rendered a form.
+            _gate_debug(step_number, url, "skipped: scan_active_region returned None (no container)")
             return
         active_text, blocking_control_present = region
 
         try:
             dom = await page.evaluate("() => document.documentElement.outerHTML")
-        except Exception:
+        except Exception as exc:
+            _gate_debug(step_number, url, f"skipped: outerHTML evaluate() raised {type(exc).__name__}: {exc}")
             return
 
         captcha_structural_hits = await scan_captcha_structural_hits(page)
@@ -602,6 +677,7 @@ def make_step_hook(
             blocking_control_present=blocking_control_present,
         )
         if hit is None:
+            _gate_debug(step_number, url, "detection ran: no GateHit (page is clean)")
             return
 
         redacted_hit = hit.model_copy(
@@ -610,12 +686,21 @@ def make_step_hook(
                     hit.evidence_snippet, profile, vault_path=vault_path, vault_key=vault_key
                 ),
                 "matched_text": redact_text(hit.matched_text, profile, vault_path=vault_path, vault_key=vault_key),
+                "url": url,
+                "step_number": step_number,
             }
         )
         gate_box.append(redacted_hit)
+        _gate_debug(
+            step_number,
+            url,
+            f"GateHit RECORDED: kind={redacted_hit.kind!r} matched_text={redacted_hit.matched_text!r}",
+        )
 
         if agent_box:
             agent_box[0].stop()
+            stop_called_at_step = step_number
+            _gate_debug(step_number, url, f"agent.stop() called at step {step_number}")
 
     return _step_hook
 

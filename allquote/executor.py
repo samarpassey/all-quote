@@ -543,8 +543,29 @@ async def _run_single_attempt(
         # A deterministic gate hit is authoritative regardless of how the
         # attempt otherwise ended (exception, budget, or a voluntary halt on
         # the same page) — checked first, before any other interpretation.
-        if gate_box:
-            hit = gate_box[0]
+        # But it is only trustworthy if it still describes the page the run
+        # actually ended on: a GateHit recorded early and never invalidated
+        # by browser_ops.make_step_hook's own url-match check (e.g. because
+        # the agent kept stepping past agent.stop() before it took effect)
+        # would otherwise be reported with a screenshot of a completely
+        # different page — a run must never report a gate detected on a
+        # page it wasn't on when it stopped. current_url is None (fetch
+        # failed) is treated the same as a mismatch: fail closed rather than
+        # trust an unverifiable hit.
+        gate_hit = gate_box[0] if gate_box else None
+        if gate_hit is not None:
+            current_url = await browser_ops.get_current_url(browser_session)
+            if current_url != gate_hit.url:
+                detail["discarded_stale_gate_hit"] = {
+                    "kind": gate_hit.kind,
+                    "recorded_url": gate_hit.url,
+                    "recorded_step": gate_hit.step_number,
+                    "final_url": current_url,
+                }
+                gate_hit = None
+
+        if gate_hit is not None:
+            hit = gate_hit
             status = _GATE_STATUS[hit.kind]
             # Best-effort: bring the matched text on screen before capture so
             # the evidence screenshot actually shows what the reason claims —

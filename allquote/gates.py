@@ -85,6 +85,18 @@ class GateHit(BaseModel):
     # short string as real page text and scroll it into view before
     # evidence capture, rather than the wider, harder-to-locate snippet.
     matched_text: str
+    # Provenance: which page this hit was actually observed on, and at
+    # which step. detect() itself never sets these — it has no concept of a
+    # "step" and only receives page_url for signature symmetry (see below) —
+    # they default to "unset" here and are populated by the caller
+    # (allquote.browser_ops's step hook) via model_copy() once a hit is
+    # confirmed. This is what lets a hit be checked against the page a run
+    # actually ended on before it's trusted (allquote/executor.py discards a
+    # GateHit whose `url` no longer matches the browser's current page —
+    # see that module's stale-hit handling) instead of being trusted
+    # forever just because it was recorded once.
+    url: str = ""
+    step_number: int = -1
 
 
 _Source = Literal["dom", "text"]
