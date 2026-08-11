@@ -71,14 +71,40 @@ requirements flags; skip routes whose requirements the profile can't meet (mark
 `ineligible`/`manual_handoff` with reason); order runs; enforce one-run-per-route.
 Done when: plan for full registry prints; every route maps to exactly one action.
 
-### Task 8 — Normalizer + dedupe
-`allquote/normalize.py`: map raw executor output → QuoteResult vs benchmark
-coverage; compute non_comparable diffs list. Dedupe: resolver that assigns
-`distinct_rate_source_id` when two routes return the same legal_underwriter +
-product_scope; second one gets status `duplicate_rate_source` pointing at first.
-Done when: fixture with aggregator returning an underwriter already quoted direct
-collapses to one distinct source; metrics function returns market completion,
-comparable yield, evidence rate, duplicate suppression.
+### Task 8 — Normalizer + dedupe — Part A DONE (coverage comparison only)
+`allquote/normalize.py` + `allquote/normalize_basis.py` + `allquote/normalize_compare.py`
++ `allquote/normalize_labels.py`: map raw executor output → NormalizedQuote vs
+RequestedBasis coverage; compute comparability and the non_comparable diffs list
+(ComparisonReport). 20 tests (C1-C12 + mandatory-AB materiality), acceptance
+artifact at exports/comparison_*.json. Dedupe (below) and capture_coverage
+(below) were explicitly descoped from this pass — see Task 8b / Task 8c.
+
+### Task 8b — Dedupe resolver
+Resolver that assigns the authoritative `distinct_rate_source_id` against real
+QuoteResults, keyed on (legal_underwriter, product_scope) per
+docs/ARCHITECTURE.md's dedupe model — registry.py's seed-time assignment
+(`assign_distinct_rate_source_ids`, keyed on legal_underwriter alone) is only
+an approximation pending this. Second route resolving to an existing key gets
+status `duplicate_rate_source` pointing at the first. Scheduled AFTER Task 7's
+batch run (needs a batch of real QuoteResults to resolve against — dedupe
+against single-route fixtures doesn't exercise the real collapse case).
+Done when: fixture with an aggregator returning an underwriter already quoted
+direct collapses to one distinct source.
+Note: `metrics.duplicate_suppression()` already exists but returns 0 for any
+real run until this lands — no route can carry `duplicate_rate_source` status
+without it.
+
+### Task 8c — capture_coverage custom action (Part B, deferred)
+`capture_coverage` custom action in browser_ops.py, per the approved Task 8
+plan Part B: the LLM transcribes verbatim label/value pairs only (no
+dimension naming, no normalization, no included-vs-unavailable judgment);
+allquote.normalize_labels' deterministic table decides what the words mean.
+Stored as CoverageObservation, same fallback-never-destroys-a-QuoteResult
+pattern as Task 5 evidence capture. Until this lands, the normalizer has no
+live material — every CoverageObservation in the test suite and the
+acceptance artifact is a hand-authored fixture, not something captured from a
+real market page. The normalization gate rests entirely on fixtures until
+Task 8c ships.
 
 ### Task 9 — More routes
 Run browser executor across 3–4 direct writers + 1 aggregator (manual runs).

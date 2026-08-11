@@ -378,3 +378,244 @@ class EvidenceRecord(BaseModel):
         if not _SHA256_HEX.match(v):
             raise ValueError("evidence_hash must be a 64-character sha256 hex digest")
         return v
+
+
+# --- Normalizer derived models (Task 8) -----------------------------------------
+#
+# Everything below is derived from QuoteResult + IntakeProfile, not part of the
+# five canonical models (IntakeProfile, MarketRecord, QuoteResult, EvidenceRecord,
+# VaultRef). Mirrors docs/SCHEMAS.md's "Normalizer derived models" section.
+
+
+class CoverageDimension(str, Enum):
+    THIRD_PARTY_LIABILITY = "third_party_liability"
+    ACCIDENT_BENEFITS_MANDATORY = "accident_benefits_mandatory"
+    AB_OPT_INCOME_REPLACEMENT = "ab_opt_income_replacement"
+    AB_OPT_NON_EARNER = "ab_opt_non_earner"
+    AB_OPT_CAREGIVER = "ab_opt_caregiver"
+    AB_OPT_LOST_EDUCATIONAL_EXPENSES = "ab_opt_lost_educational_expenses"
+    AB_OPT_EXPENSES_OF_VISITORS = "ab_opt_expenses_of_visitors"
+    AB_OPT_HOUSEKEEPING_HOME_MAINTENANCE = "ab_opt_housekeeping_home_maintenance"
+    AB_OPT_DAMAGE_TO_PERSONAL_ITEMS = "ab_opt_damage_to_personal_items"
+    AB_OPT_DEATH = "ab_opt_death"
+    AB_OPT_FUNERAL = "ab_opt_funeral"
+    AB_OPT_DEPENDANT_CARE = "ab_opt_dependant_care"
+    AB_OPT_INDEXATION = "ab_opt_indexation"
+    AB_OPT_SUPPLEMENTARY_MEDICAL_REHAB_ATTENDANT_CARE = (
+        "ab_opt_supplementary_medical_rehab_attendant_care"
+    )
+    AB_OPT_CATASTROPHIC_IMPAIRMENT = "ab_opt_catastrophic_impairment"
+    UNINSURED_AUTOMOBILE = "uninsured_automobile"
+    DCPD = "dcpd"
+    OWN_DAMAGE_SPECIFIED_PERILS = "own_damage_specified_perils"
+    OWN_DAMAGE_COMPREHENSIVE = "own_damage_comprehensive"
+    OWN_DAMAGE_COLLISION = "own_damage_collision"
+    OWN_DAMAGE_ALL_PERILS = "own_damage_all_perils"
+    OPCF_20_TRANSPORTATION_REPLACEMENT = "opcf_20_transportation_replacement"
+    OPCF_27_NON_OWNED_AUTOMOBILES = "opcf_27_non_owned_automobiles"
+    OPCF_43_REMOVING_DEPRECIATION_DEDUCTION = "opcf_43_removing_depreciation_deduction"
+    OPCF_44R_FAMILY_PROTECTION = "opcf_44r_family_protection"
+    OPCF_49_DCPD_OPT_OUT = "opcf_49_dcpd_opt_out"
+    OTHER_ENDORSEMENT = "other_endorsement"
+
+
+# Every CoverageDimension except OTHER_ENDORSEMENT gets exactly one line on
+# every RequestedBasis and every NormalizedQuote. OTHER_ENDORSEMENT is the one
+# exception: it may repeat (one line per distinct unmapped label) or be absent.
+REQUESTABLE_DIMENSIONS: frozenset[CoverageDimension] = frozenset(
+    d for d in CoverageDimension if d != CoverageDimension.OTHER_ENDORSEMENT
+)
+
+
+class DisclosureState(str, Enum):
+    INCLUDED = "included"
+    EXCLUDED = "excluded"
+    UNAVAILABLE = "unavailable"
+    UNKNOWN = "unknown"
+
+
+class Comparability(str, Enum):
+    IDENTICAL_BASIS = "identical_basis"
+    DIFFERS_ON_COVERAGE = "differs_on_coverage"
+    INDICATIVE_ONLY = "indicative_only"
+    NOT_COMPARABLE = "not_comparable"
+
+
+class CoverageObservation(BaseModel):
+    """Raw verbatim capture: what a market's page or rep said, uninterpreted."""
+
+    source_label: str
+    source_value: str | None = None
+    captured_at: datetime
+    evidence_id: str
+
+
+class CoverageLine(BaseModel):
+    """One interpreted coverage dimension, on a RequestedBasis or a NormalizedQuote."""
+
+    dimension: CoverageDimension
+    disclosure: DisclosureState
+    limit_cad: float | None = None
+    deductible_cad: float | None = None
+    source_label: str | None = None
+    source_value: str | None = None
+    provenance: Provenance
+
+    @model_validator(mode="after")
+    def _unknown_carries_no_values(self) -> "CoverageLine":
+        if self.disclosure == DisclosureState.UNKNOWN:
+            if any(
+                v is not None
+                for v in (self.limit_cad, self.deductible_cad, self.source_label, self.source_value)
+            ):
+                raise ValueError(
+                    "CoverageLine with disclosure=unknown must carry no limit, deductible, "
+                    "or source origin — silence is recorded, never given a substitute value"
+                )
+        elif self.source_label is None:
+            raise ValueError(
+                "CoverageLine with disclosure != unknown must carry a verbatim source_label "
+                "— None is reserved for the unknown case"
+            )
+        return self
+
+
+class RequestedBasis(BaseModel):
+    """The single reference coverage basis for one run, derived once from
+    IntakeProfile.coverage_benchmark. Every quote's comparability is assessed
+    against this — never pairwise between quotes."""
+
+    requested_basis_id: str
+    requested_effective_date: date
+    term_months: int
+    lines: list[CoverageLine]
+    captured_at: datetime
+
+    @model_validator(mode="after")
+    def _covers_every_requestable_dimension_as_known(self) -> "RequestedBasis":
+        seen = [line.dimension for line in self.lines]
+        if len(seen) != len(set(seen)):
+            raise ValueError("RequestedBasis has a duplicate dimension line")
+        if set(seen) != REQUESTABLE_DIMENSIONS:
+            missing = REQUESTABLE_DIMENSIONS - set(seen)
+            extra = set(seen) - REQUESTABLE_DIMENSIONS
+            raise ValueError(
+                f"RequestedBasis must carry exactly one line per requestable dimension "
+                f"(missing={sorted(d.value for d in missing)}, extra={sorted(d.value for d in extra)})"
+            )
+        for line in self.lines:
+            if line.disclosure not in (DisclosureState.INCLUDED, DisclosureState.EXCLUDED):
+                raise ValueError(
+                    f"RequestedBasis.{line.dimension.value} has disclosure={line.disclosure.value}: "
+                    "a basis is authored by us, not observed from a market — every dimension is "
+                    "either included or excluded by our own request, never unavailable or unknown"
+                )
+        return self
+
+
+class NormalizedPremium(BaseModel):
+    annual_premium_cad: float | None = None
+    monthly_premium_cad: float | None = None
+    annualized_from_monthly_cad: float | None = None
+    annualized_by_us: bool = False
+    down_payment_cad: float | None = None
+    instalment_count: int | None = None
+    instalment_amount_cad: float | None = None
+    finance_or_instalment_charges_cad: float | None = None
+    taxes_or_fees_cad: float | None = None
+    total_estimated_cost_cad: float | None = None
+    currency: str = "CAD"
+    term_months: int | None = None
+    payment_basis: Literal["annual", "monthly", "not_disclosed"]
+
+    @model_validator(mode="after")
+    def _monthly_only_never_yields_annual(self) -> "NormalizedPremium":
+        if self.payment_basis == "monthly" and self.annual_premium_cad is not None:
+            raise ValueError(
+                "payment_basis='monthly' but annual_premium_cad is set — Ontario monthly "
+                "plans carry finance charges; annual must never be derived from monthly x 12"
+            )
+        if not self.annualized_by_us and self.annualized_from_monthly_cad is not None:
+            raise ValueError("annualized_from_monthly_cad is set but annualized_by_us is False")
+        return self
+
+
+class NormalizedValidity(BaseModel):
+    quote_or_reference_id: str | None = None
+    effective_date: date | None = None
+    expiry_or_guarantee_date: date | None = None
+    verification_may_change_premium: bool | None = None
+
+
+class NormalizedDiscount(BaseModel):
+    name: str
+    state: Literal["applied", "available_not_selected", "conditional_on_purchase"]
+    condition: str | None = None
+
+
+class NormalizedQuote(BaseModel):
+    market_id: str
+    rate_source_id: str | None = None
+    status: Status
+    # Stored, not re-derivable-by-name: ComparisonReport.comparability is
+    # explicitly required to be COPIED from here, never recomputed (A4) — so
+    # this needs a place to live even though the task's NormalizedQuote field
+    # list didn't name it. Computed once by assess_comparability() and never
+    # touched again.
+    comparability: Comparability
+    requested_basis_id: str
+    lines: list[CoverageLine]
+    binding_basis: Literal["bound_offer", "indicative_assumption", "none"]
+    premium: NormalizedPremium
+    validity: NormalizedValidity
+    discounts: list[NormalizedDiscount] = Field(default_factory=list)
+    confidence: Literal["high", "medium", "low"]
+    normalization_warnings: list[str] = Field(default_factory=list)
+    captured_at: datetime
+    evidence_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _covers_every_requestable_dimension(self) -> "NormalizedQuote":
+        seen = [line.dimension for line in self.lines if line.dimension != CoverageDimension.OTHER_ENDORSEMENT]
+        if len(seen) != len(set(seen)):
+            raise ValueError("NormalizedQuote has a duplicate non-other_endorsement dimension line")
+        if set(seen) != REQUESTABLE_DIMENSIONS:
+            missing = REQUESTABLE_DIMENSIONS - set(seen)
+            extra = set(seen) - REQUESTABLE_DIMENSIONS
+            raise ValueError(
+                f"NormalizedQuote must carry exactly one line per requestable dimension "
+                f"(missing={sorted(d.value for d in missing)}, extra={sorted(d.value for d in extra)}); "
+                "dimensions never mentioned by the market must still appear with disclosure=unknown"
+            )
+        return self
+
+
+class CoverageDelta(BaseModel):
+    """One dimension's row in a ComparisonReport: what the basis asked for,
+    what each compared quote disclosed, and how material the difference is."""
+
+    dimension: CoverageDimension
+    requested: CoverageLine
+    per_quote: dict[str, CoverageLine]
+    materiality: Literal["material", "minor", "evidenced_gap", "undisclosed_gap"]
+    warning: str | None = None
+
+
+class PriceView(BaseModel):
+    per_quote: dict[str, NormalizedPremium]
+    price_comparison_valid: bool
+    reason: str
+
+
+class ComparisonReport(BaseModel):
+    """Reports only — never sets status (allquote.normalize owns that via
+    assess_comparability). Field declaration order is significant: coverage
+    differences must serialize before price, per BRIEF.md §7 ("see coverage
+    differences before price differences")."""
+
+    inputs: list[str]
+    requested_basis_id: str
+    comparability: dict[str, Comparability]
+    coverage_deltas: list[CoverageDelta]
+    undisclosed_dimensions: list[CoverageDimension]
+    price_view: PriceView

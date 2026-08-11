@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from allquote.schemas import (
+    CoverageDimension,
     EvidenceRecord,
     IntakeAddress,
     IntakeContact,
@@ -43,6 +44,42 @@ EXPECTED_STATUS_VALUES = [
 def test_status_has_exactly_13_values_matching_docs():
     assert len(Status) == 13
     assert {s.value for s in Status} == set(EXPECTED_STATUS_VALUES)
+
+
+EXPECTED_COVERAGE_DIMENSION_VALUES = [
+    "third_party_liability",
+    "accident_benefits_mandatory",
+    "ab_opt_income_replacement",
+    "ab_opt_non_earner",
+    "ab_opt_caregiver",
+    "ab_opt_lost_educational_expenses",
+    "ab_opt_expenses_of_visitors",
+    "ab_opt_housekeeping_home_maintenance",
+    "ab_opt_damage_to_personal_items",
+    "ab_opt_death",
+    "ab_opt_funeral",
+    "ab_opt_dependant_care",
+    "ab_opt_indexation",
+    "ab_opt_supplementary_medical_rehab_attendant_care",
+    "ab_opt_catastrophic_impairment",
+    "uninsured_automobile",
+    "dcpd",
+    "own_damage_specified_perils",
+    "own_damage_comprehensive",
+    "own_damage_collision",
+    "own_damage_all_perils",
+    "opcf_20_transportation_replacement",
+    "opcf_27_non_owned_automobiles",
+    "opcf_43_removing_depreciation_deduction",
+    "opcf_44r_family_protection",
+    "opcf_49_dcpd_opt_out",
+    "other_endorsement",
+]
+
+
+def test_coverage_dimension_has_exactly_27_values_matching_docs():
+    assert len(CoverageDimension) == 27
+    assert {d.value for d in CoverageDimension} == set(EXPECTED_COVERAGE_DIMENSION_VALUES)
 
 
 def test_intake_profile_round_trip_json():

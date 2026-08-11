@@ -3,6 +3,9 @@ data/*
 !data/seed_registry.json
 exports/*
 !exports/.gitkeep
+!exports/acceptance_inputs/
+!exports/acceptance_inputs/*.json
+!exports/comparison_*.json
 __pycache__/
 *.pyc
 .venv/

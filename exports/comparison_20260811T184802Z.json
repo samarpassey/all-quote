@@ -1,0 +1,888 @@
+{
+  "inputs": [
+    "demo-marketa-001",
+    "demo-marketb-002"
+  ],
+  "requested_basis_id": "basis-6c6fe224",
+  "comparability": {
+    "demo-marketa-001": "differs_on_coverage",
+    "demo-marketb-002": "identical_basis"
+  },
+  "coverage_deltas": [
+    {
+      "dimension": "ab_opt_caregiver",
+      "requested": {
+        "dimension": "ab_opt_caregiver",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[caregiver]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_caregiver",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_caregiver",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Optional Caregiver, Housekeeping & Home Maintenance",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_damage_to_personal_items",
+      "requested": {
+        "dimension": "ab_opt_damage_to_personal_items",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[damage_to_personal_items]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_damage_to_personal_items",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_damage_to_personal_items",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Loss of or Damage to Personal Property",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_funeral",
+      "requested": {
+        "dimension": "ab_opt_funeral",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[funeral]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_funeral",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_funeral",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Funeral Expense Benefit",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_supplementary_medical_rehab_attendant_care",
+      "requested": {
+        "dimension": "ab_opt_supplementary_medical_rehab_attendant_care",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[supplementary_medical]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_supplementary_medical_rehab_attendant_care",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_supplementary_medical_rehab_attendant_care",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Supplementary Medical, Rehabilitation and Attendant Care",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_dependant_care",
+      "requested": {
+        "dimension": "ab_opt_dependant_care",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[dependant_care]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_dependant_care",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_dependant_care",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Dependant Care Benefit",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "opcf_27_non_owned_automobiles",
+      "requested": {
+        "dimension": "opcf_27_non_owned_automobiles",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.endorsements",
+        "source_value": "not selected",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "opcf_27_non_owned_automobiles",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "opcf_27_non_owned_automobiles",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Non-Owned Automobile Endorsement (OPCF 27)",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "accident_benefits_mandatory",
+      "requested": {
+        "dimension": "accident_benefits_mandatory",
+        "disclosure": "included",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "normalize_labels.BASIS_DEFAULTS[accident_benefits_mandatory]",
+        "source_value": "included",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "accident_benefits_mandatory",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "accident_benefits_mandatory",
+          "disclosure": "included",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Accident Benefits - Standard",
+          "source_value": "Included",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "opcf_49_dcpd_opt_out",
+      "requested": {
+        "dimension": "opcf_49_dcpd_opt_out",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "normalize_labels.BASIS_DEFAULTS[opcf_49_dcpd_opt_out]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "opcf_49_dcpd_opt_out",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "opcf_49_dcpd_opt_out",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "DCPD Opt-Out Endorsement (OPCF 49)",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_death",
+      "requested": {
+        "dimension": "ab_opt_death",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[death]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_death",
+          "disclosure": "unavailable",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Death Benefit",
+          "source_value": "Not offered by this insurer",
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_death",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Death Benefit",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "evidenced_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_housekeeping_home_maintenance",
+      "requested": {
+        "dimension": "ab_opt_housekeeping_home_maintenance",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[housekeeping]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_housekeeping_home_maintenance",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_housekeeping_home_maintenance",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Optional Caregiver, Housekeeping & Home Maintenance",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_expenses_of_visitors",
+      "requested": {
+        "dimension": "ab_opt_expenses_of_visitors",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[expenses_of_visitors]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_expenses_of_visitors",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_expenses_of_visitors",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Expenses of Visitors Benefit",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "opcf_43_removing_depreciation_deduction",
+      "requested": {
+        "dimension": "opcf_43_removing_depreciation_deduction",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.endorsements",
+        "source_value": "not selected",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "opcf_43_removing_depreciation_deduction",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "opcf_43_removing_depreciation_deduction",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Depreciation Waiver Endorsement (OPCF 43)",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_non_earner",
+      "requested": {
+        "dimension": "ab_opt_non_earner",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[non_earner]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_non_earner",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_non_earner",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Non-Earner Benefit",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "own_damage_collision",
+      "requested": {
+        "dimension": "own_damage_collision",
+        "disclosure": "included",
+        "limit_cad": null,
+        "deductible_cad": 1000.0,
+        "source_label": "coverage_benchmark.collision_deductible",
+        "source_value": "1000",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "own_damage_collision",
+          "disclosure": "included",
+          "limit_cad": null,
+          "deductible_cad": 500.0,
+          "source_label": "Collision Coverage",
+          "source_value": "$500 ded.",
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "own_damage_collision",
+          "disclosure": "included",
+          "limit_cad": null,
+          "deductible_cad": 1000.0,
+          "source_label": "Collision Coverage",
+          "source_value": "$1,000 ded.",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "material",
+      "warning": null
+    },
+    {
+      "dimension": "own_damage_all_perils",
+      "requested": {
+        "dimension": "own_damage_all_perils",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "normalize_labels.BASIS_DEFAULTS[own_damage_all_perils]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "own_damage_all_perils",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "own_damage_all_perils",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "All Perils Coverage",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_catastrophic_impairment",
+      "requested": {
+        "dimension": "ab_opt_catastrophic_impairment",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[catastrophic]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_catastrophic_impairment",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_catastrophic_impairment",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Catastrophic Impairment Benefit",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "own_damage_specified_perils",
+      "requested": {
+        "dimension": "own_damage_specified_perils",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "normalize_labels.BASIS_DEFAULTS[own_damage_specified_perils]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "own_damage_specified_perils",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "own_damage_specified_perils",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Specified Perils Coverage",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "own_damage_comprehensive",
+      "requested": {
+        "dimension": "own_damage_comprehensive",
+        "disclosure": "included",
+        "limit_cad": null,
+        "deductible_cad": 1000.0,
+        "source_label": "coverage_benchmark.comprehensive_deductible",
+        "source_value": "1000",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "own_damage_comprehensive",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "own_damage_comprehensive",
+          "disclosure": "included",
+          "limit_cad": null,
+          "deductible_cad": 1000.0,
+          "source_label": "Other Than Collision (Comprehensive)",
+          "source_value": "$1,000 ded.",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_lost_educational_expenses",
+      "requested": {
+        "dimension": "ab_opt_lost_educational_expenses",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[lost_educational_expenses]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_lost_educational_expenses",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_lost_educational_expenses",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Loss of Educational Expenses Benefit",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "third_party_liability",
+      "requested": {
+        "dimension": "third_party_liability",
+        "disclosure": "included",
+        "limit_cad": 2000000.0,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.liability_limit",
+        "source_value": "2000000",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "third_party_liability",
+          "disclosure": "included",
+          "limit_cad": 1000000.0,
+          "deductible_cad": null,
+          "source_label": "Liability - Bodily Injury & Property Damage",
+          "source_value": "$1,000,000",
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "third_party_liability",
+          "disclosure": "included",
+          "limit_cad": 2000000.0,
+          "deductible_cad": null,
+          "source_label": "Liability - Bodily Injury & Property Damage",
+          "source_value": "$2,000,000",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "material",
+      "warning": null
+    },
+    {
+      "dimension": "opcf_20_transportation_replacement",
+      "requested": {
+        "dimension": "opcf_20_transportation_replacement",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.endorsements",
+        "source_value": "not selected",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "opcf_20_transportation_replacement",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "opcf_20_transportation_replacement",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Loss of Use / Transportation Replacement",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_income_replacement",
+      "requested": {
+        "dimension": "ab_opt_income_replacement",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[income_replacement]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_income_replacement",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_income_replacement",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Income Replacement Benefit - Increased",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "ab_opt_indexation",
+      "requested": {
+        "dimension": "ab_opt_indexation",
+        "disclosure": "excluded",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "coverage_benchmark.optional_ab_selections[indexation]",
+        "source_value": "excluded",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "ab_opt_indexation",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "ab_opt_indexation",
+          "disclosure": "excluded",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Indexation Benefit",
+          "source_value": "Excluded",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    },
+    {
+      "dimension": "uninsured_automobile",
+      "requested": {
+        "dimension": "uninsured_automobile",
+        "disclosure": "included",
+        "limit_cad": null,
+        "deductible_cad": null,
+        "source_label": "normalize_labels.BASIS_DEFAULTS[uninsured_automobile]",
+        "source_value": "included",
+        "provenance": "derived"
+      },
+      "per_quote": {
+        "demo-marketa-001": {
+          "dimension": "uninsured_automobile",
+          "disclosure": "unknown",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": null,
+          "source_value": null,
+          "provenance": "observed"
+        },
+        "demo-marketb-002": {
+          "dimension": "uninsured_automobile",
+          "disclosure": "included",
+          "limit_cad": null,
+          "deductible_cad": null,
+          "source_label": "Uninsured Automobile Coverage",
+          "source_value": "Included",
+          "provenance": "observed"
+        }
+      },
+      "materiality": "undisclosed_gap",
+      "warning": null
+    }
+  ],
+  "undisclosed_dimensions": [
+    "ab_opt_caregiver",
+    "ab_opt_damage_to_personal_items",
+    "ab_opt_funeral",
+    "ab_opt_supplementary_medical_rehab_attendant_care",
+    "ab_opt_dependant_care",
+    "opcf_27_non_owned_automobiles",
+    "accident_benefits_mandatory",
+    "opcf_49_dcpd_opt_out",
+    "ab_opt_housekeeping_home_maintenance",
+    "ab_opt_expenses_of_visitors",
+    "opcf_43_removing_depreciation_deduction",
+    "ab_opt_non_earner",
+    "own_damage_all_perils",
+    "ab_opt_catastrophic_impairment",
+    "own_damage_specified_perils",
+    "own_damage_comprehensive",
+    "ab_opt_lost_educational_expenses",
+    "opcf_20_transportation_replacement",
+    "ab_opt_income_replacement",
+    "ab_opt_indexation",
+    "uninsured_automobile"
+  ],
+  "price_view": {
+    "per_quote": {
+      "demo-marketa-001": {
+        "annual_premium_cad": 1850.0,
+        "monthly_premium_cad": null,
+        "annualized_from_monthly_cad": null,
+        "annualized_by_us": false,
+        "down_payment_cad": null,
+        "instalment_count": null,
+        "instalment_amount_cad": null,
+        "finance_or_instalment_charges_cad": null,
+        "taxes_or_fees_cad": 92.5,
+        "total_estimated_cost_cad": 1942.5,
+        "currency": "CAD",
+        "term_months": 12,
+        "payment_basis": "annual"
+      },
+      "demo-marketb-002": {
+        "annual_premium_cad": 1620.0,
+        "monthly_premium_cad": null,
+        "annualized_from_monthly_cad": null,
+        "annualized_by_us": false,
+        "down_payment_cad": null,
+        "instalment_count": null,
+        "instalment_amount_cad": null,
+        "finance_or_instalment_charges_cad": null,
+        "taxes_or_fees_cad": 81.0,
+        "total_estimated_cost_cad": 1701.0,
+        "currency": "CAD",
+        "term_months": 12,
+        "payment_basis": "annual"
+      }
+    },
+    "price_comparison_valid": false,
+    "reason": "material coverage difference on: own_damage_collision, third_party_liability"
+  }
+}

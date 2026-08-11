@@ -1,0 +1,72 @@
+{
+  "quote_result": {
+    "source": {
+      "registry_id": "demo-marketb-002",
+      "brand_or_program": "Marketb Broker Select",
+      "legal_underwriter": "Marketb Underwriters Inc.",
+      "insurer_group": "Marketb Group",
+      "licensed_intermediary": "Marketb Brokerage Ltd. (RIBO)",
+      "distinct_rate_source_id": "marketb-underwriters-inc::standard_PPA"
+    },
+    "outcome": {
+      "status": "quoted_comparable",
+      "is_exact_quote": true,
+      "failure_reason": null,
+      "next_action": null
+    },
+    "coverage": {"requested": {}, "returned": {}, "variance_from_benchmark": []},
+    "discounts": {"applied": ["multi_vehicle"], "available_not_selected": [], "conditional": ["claims_free_at_renewal"]},
+    "validity": {
+      "quote_reference_id": "MKTB-REF-40157",
+      "effective_date": "2026-09-01",
+      "expiry_date": "2026-10-01",
+      "verification_may_change_premium": false
+    },
+    "evidence": {
+      "timestamp": "2026-08-11T14:05:00Z",
+      "source_url_or_phone": "https://marketb.example.invalid/broker-quote",
+      "evidence_artifact": "data/evidence/demo-marketb-002/quote.png",
+      "evidence_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "confidence": "high",
+    "privacy": {"fields_disclosed": ["make", "model", "model_year"], "consent_receipt_id": null, "retention_deadline": null},
+    "price": {
+      "annual_premium": 1620.0,
+      "monthly_amount": null,
+      "down_payment": null,
+      "instalment_fee": null,
+      "taxes_fees": 81.0,
+      "total_estimated": 1701.0,
+      "currency": "CAD"
+    }
+  },
+  "observations": [
+    {"source_label": "Liability - Bodily Injury & Property Damage", "source_value": "$2,000,000", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Direct Compensation - Property Damage", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Collision Coverage", "source_value": "$1,000 ded.", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Other Than Collision (Comprehensive)", "source_value": "$1,000 ded.", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Loss of Use / Transportation Replacement", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Non-Owned Automobile Endorsement (OPCF 27)", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Depreciation Waiver Endorsement (OPCF 43)", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Family Protection Coverage (OPCF 44R)", "source_value": "Included", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Income Replacement Benefit - Increased", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Non-Earner Benefit", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Optional Caregiver, Housekeeping & Home Maintenance", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Loss of Educational Expenses Benefit", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Expenses of Visitors Benefit", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Loss of or Damage to Personal Property", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Death Benefit", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Funeral Expense Benefit", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Dependant Care Benefit", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Indexation Benefit", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Supplementary Medical, Rehabilitation and Attendant Care", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Catastrophic Impairment Benefit", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Accident Benefits - Standard", "source_value": "Included", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Uninsured Automobile Coverage", "source_value": "Included", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "Specified Perils Coverage", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "All Perils Coverage", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"},
+    {"source_label": "DCPD Opt-Out Endorsement (OPCF 49)", "source_value": "Excluded", "captured_at": "2026-08-11T14:05:00Z", "evidence_id": "evd-marketb-002"}
+  ],
+  "distribution_type": "broker",
+  "evidence_ids": ["evd-marketb-002"]
+}

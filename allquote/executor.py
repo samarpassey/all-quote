@@ -17,7 +17,6 @@ fixed `unreachable` status with the model's reason kept as plain-text detail.
 
 import argparse
 import asyncio
-import hashlib
 import json
 import os
 import socket
@@ -33,6 +32,7 @@ from browser_use import Agent, BrowserProfile, BrowserSession, ChatAnthropic
 from dotenv import load_dotenv
 
 from allquote import browser_ops, gates, registry, vault
+from allquote.evidence import write_evidence_record
 from allquote.redact import redact_text, safe_write_evidence
 from allquote.schemas import (
     CoverageBenchmark,
@@ -110,40 +110,6 @@ def _new_run_id() -> str:
     return uuid4().hex[:12]
 
 
-def _evidence_record(
-    *,
-    registry_id: str,
-    kind: Literal["screenshot", "html_snapshot", "call_transcript", "call_outcome", "consent_receipt", "document"],
-    timestamp: datetime,
-    source_url_or_phone: str,
-    artifact_path: Path,
-    provenance: Literal["observed", "derived"],
-    fields_disclosed: list[str] = (),
-) -> EvidenceRecord:
-    """Writes one EvidenceRecord JSON alongside `artifact_path`. Task 4 owns
-    the SQLite evidence index; for now (Task 5) each artifact gets its own
-    sidecar JSON, per the task brief.
-    """
-    evidence_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
-    record = EvidenceRecord(
-        evidence_id=uuid4().hex,
-        registry_id=registry_id,
-        kind=kind,
-        timestamp=timestamp,
-        source_url_or_phone=source_url_or_phone,
-        artifact_path=str(artifact_path),
-        evidence_hash=evidence_hash,
-        redacted=True,
-        provenance=provenance,
-        fields_disclosed=list(fields_disclosed),
-        consent_receipt_id=None,
-        retention_deadline=None,
-    )
-    sidecar_path = artifact_path.with_suffix(artifact_path.suffix + ".evidence.json")
-    sidecar_path.write_text(record.model_dump_json(indent=2))
-    return record
-
-
 def _write_derived_channel_evidence(
     record: MarketRecord,
     profile: IntakeProfile,
@@ -169,7 +135,7 @@ def _write_derived_channel_evidence(
         indent=2,
     )
     safe_write_evidence(payload, "text", destination, profile=profile, vault_path=vault_path, vault_key=vault_key)
-    return _evidence_record(
+    return write_evidence_record(
         registry_id=record.registry_id,
         kind="document",
         timestamp=datetime.now(timezone.utc),
@@ -193,7 +159,7 @@ def _write_run_start_evidence(record: MarketRecord, run_id: str, profile: Intake
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(payload)
-    _evidence_record(
+    write_evidence_record(
         registry_id=record.registry_id,
         kind="document",
         timestamp=datetime.now(timezone.utc),
@@ -237,7 +203,7 @@ async def _write_attempt_evidence(
     if browser_session is not None:
         try:
             await browser_ops.capture_evidence_screenshot(browser_session, sensitive_data, screenshot_path)
-            return _evidence_record(
+            return write_evidence_record(
                 registry_id=record.registry_id,
                 kind="screenshot",
                 timestamp=datetime.now(timezone.utc),
@@ -255,7 +221,7 @@ async def _write_attempt_evidence(
             safe_write_evidence(
                 failure_text, "text", failure_path, profile=profile, vault_path=vault_path, vault_key=vault_key
             )
-            return _evidence_record(
+            return write_evidence_record(
                 registry_id=record.registry_id,
                 kind="document",
                 timestamp=datetime.now(timezone.utc),
@@ -265,7 +231,7 @@ async def _write_attempt_evidence(
                 fields_disclosed=fields_disclosed,
             )
 
-    return _evidence_record(
+    return write_evidence_record(
         registry_id=record.registry_id,
         kind="document",
         timestamp=datetime.now(timezone.utc),

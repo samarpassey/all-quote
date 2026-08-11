@@ -13,7 +13,7 @@ sell insurance, bind coverage, give licensed advice, or act for anyone else.
 - Changing material facts across insurers to manufacture a lower premium
 - Presenting an estimate, lead form, or callback promise as a firm quote
 
-## Human checkpoints (executor raises HumanCheckpointRequired)
+## Human checkpoints (terminal status, not an exception — see CLAUDE.md)
 
 | trigger | behaviour |
 |---|---|

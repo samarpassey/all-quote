@@ -110,6 +110,105 @@ values), consent_receipt_id (nullable), retention_deadline (nullable). The last
 four fields mirror QuoteResult's privacy group and back the evidence drill-down
 view and the one-click delete-all flow (see docs/GUARDRAILS.md retention rules).
 
+## Normalizer derived models (Task 8)
+
+Everything in this section is *derived* — built from QuoteResult and
+IntakeProfile, not part of the five canonical models (IntakeProfile,
+MarketRecord, QuoteResult, EvidenceRecord, VaultRef), which are unchanged by
+this section. Owned by `allquote/normalize.py` and `allquote/normalize_labels.py`.
+
+**CoverageDimension** — FIXED 27-value enum, guarded by a test mirroring the
+Status guard. Verified against BRIEF.md §6/§7: third_party_liability,
+accident_benefits_mandatory, the 13 optional accident benefits named in §6
+("Optional benefits to record") each as its own `ab_opt_*` member (never
+merged), uninsured_automobile, dcpd, the 4 own-damage perils (specified
+perils, comprehensive, collision, all perils), the 5 OPCF endorsements the
+brief names by number (20, 27, 43, 44R, 49 — 49 comes from §6's DCPD
+paragraph, not the Endorsements row), and other_endorsement for unmapped
+labels. `REQUESTABLE_DIMENSIONS` = all 27 minus other_endorsement (26).
+
+**DisclosureState** — included | excluded | unavailable | unknown, the
+brief's own vocabulary (§6 demo-benchmark box) verbatim. Never interchanged:
+excluded/unavailable are things the market TOLD us (evidence of reach);
+unknown is the only state representing a gap in our own knowledge.
+
+**Comparability** — identical_basis | differs_on_coverage | indicative_only |
+not_comparable. Computed once per quote by `assess_comparability()`, always
+against RequestedBasis, never pairwise between quotes.
+
+**CoverageObservation** — raw verbatim label/value capture, no
+interpretation: source_label, source_value (nullable), captured_at,
+evidence_id.
+
+**CoverageLine** — one interpreted dimension: dimension, disclosure,
+limit_cad, deductible_cad, source_label/source_value (verbatim origin — both
+None only when disclosure=unknown; source_label required otherwise),
+provenance ∈ {observed, derived} (reuses EvidenceRecord's Provenance
+literal exactly).
+
+**RequestedBasis** — one per run, derived once from
+IntakeProfile.coverage_benchmark via `derive_requested_basis()`. Carries
+exactly one CoverageLine per requestable dimension (26), disclosure always
+included or excluded — never unavailable/unknown, since a basis is authored
+by us, not observed from a market. Dimensions CoverageBenchmark doesn't
+directly cover fall back to an explicit `BASIS_DEFAULTS` table (in
+normalize_labels.py), not a blanket default:
+  - accident_benefits_mandatory → included, limit_cad=None (mandatory by
+    law; §6: only these remain mandatory for new Ontario policies after
+    July 1, 2026 — not a limit we synthesize)
+  - uninsured_automobile → included (mandatory Ontario coverage; §6 requires
+    included status and limit details where returned)
+  - own_damage_specified_perils → excluded (benchmark elects collision +
+    comprehensive; specified perils is the unchosen alternative)
+  - own_damage_all_perils → excluded (same reason)
+  - opcf_49_dcpd_opt_out → excluded (benchmark includes DCPD; opting out
+    would contradict the basis)
+Every quote's comparability is assessed against this one object; its id is
+stamped into every NormalizedQuote so a judge can see what "comparable" was
+measured against.
+
+**NormalizedQuote** — market_id, rate_source_id, status, comparability (stored,
+computed once by `assess_comparability()` — ComparisonReport copies this
+rather than recomputing it, so it needs to live somewhere; not in the task's
+original NormalizedQuote field list but added for that reason), requested_basis_id,
+lines (one per requestable dimension, plus zero or more other_endorsement
+lines), binding_basis ∈ {bound_offer, indicative_assumption, none},
+premium (NormalizedPremium: annual/monthly/annualized_from_monthly_cad —
+annual is NEVER derived from monthly × 12 — down_payment, instalments,
+finance charges, taxes/fees, total, currency, term_months, payment_basis),
+validity (NormalizedValidity), discounts (list of NormalizedDiscount:
+name/state/condition), confidence ∈ {high, medium, low} — derived from
+comparability AND the route's distribution_type, not a restatement of
+comparability (a licensed-intermediary-channel quote is medium even when
+coverage differs), normalization_warnings, captured_at, evidence_ids.
+
+Status derivation — the ONLY place status is derived from coverage:
+  identical_basis     → quoted_comparable
+  differs_on_coverage → quoted_non_comparable (quote preserved, every
+                        difference listed, per §6: "If a route cannot match
+                        it, preserve the quote but mark it non-comparable")
+  indicative_only     → estimate_only
+  not_comparable       → status unchanged
+Bounded authority: the normalizer may only ever write one of
+{quoted_comparable, quoted_non_comparable, estimate_only}, and only when the
+input QuoteResult.outcome.status is already one of those three. Attempting
+to write over a terminal status raises rather than silently passing.
+
+**ComparisonReport** — reports only, never sets status. Field declaration
+order is significant and enforced by the model itself: coverage_deltas
+serializes before price_view, per §7 ("see coverage differences before price
+differences"). inputs, requested_basis_id, comparability (copied from each
+quote's own A2 result, never recomputed — one source of truth),
+coverage_deltas (CoverageDelta: dimension, the requested basis line, each
+compared quote's line, materiality ∈ {material, minor, evidenced_gap,
+undisclosed_gap}, optional warning), undisclosed_dimensions (dimensions
+where any input is unknown ONLY — unavailable is evidence, not a gap, and
+never appears here), price_view (PriceView: per-quote premiums,
+price_comparison_valid, reason). No ranking, no best/cheapest/recommended/
+winner/savings field or value anywhere in this model — ordering is the
+caller's concern, per §7's "never label the lowest displayed number as
+best."
+
 ## Metrics (computed, never hand-edited)
 
 market_completion = evidence-backed terminal statuses ÷ verified applicable sources

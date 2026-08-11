@@ -8,9 +8,13 @@ licence number, VIN, or DOB.
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from allquote.normalize_basis import derive_requested_basis, unknown_line
 from allquote.schemas import (
+    REQUESTABLE_DIMENSIONS,
+    Comparability,
     CoverageBenchmark,
     CoverageComparison,
+    CoverageObservation,
     DiscountInfo,
     EvidenceInfo,
     EvidenceRecord,
@@ -22,10 +26,14 @@ from allquote.schemas import (
     IntakeProfile,
     IntakeVehicle,
     MarketRecord,
+    NormalizedPremium,
+    NormalizedQuote,
+    NormalizedValidity,
     PrivacyInfo,
     QuoteOutcome,
     QuoteResult,
     QuoteSource,
+    RequestedBasis,
     Status,
     ValidityInfo,
     VaultRef,
@@ -261,3 +269,58 @@ def build_vaulted_profile(
         history=history,
     )
     return profile, plaintext
+
+
+# --- Task 8 normalizer builders -------------------------------------------------
+
+
+def build_coverage_observation(**overrides) -> CoverageObservation:
+    data = dict(
+        source_label="Liability - Bodily Injury & Property Damage",
+        source_value="$2,000,000",
+        captured_at=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+        evidence_id="evd-0001",
+    )
+    data.update(overrides)
+    return CoverageObservation(**data)
+
+
+def build_requested_basis(*, benchmark: CoverageBenchmark | None = None, **overrides) -> RequestedBasis:
+    """Built via derive_requested_basis() (the real function under test),
+    not hand-assembled — RequestedBasis's own validator requires exactly one
+    line per requestable dimension, which only derive_requested_basis is
+    responsible for guaranteeing."""
+    basis = derive_requested_basis(
+        benchmark or build_coverage_benchmark(),
+        requested_basis_id="basis-test-0001",
+        captured_at=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+    )
+    if overrides:
+        basis = basis.model_copy(update=overrides)
+    return basis
+
+
+def build_normalized_quote(**overrides) -> NormalizedQuote:
+    data = dict(
+        market_id="test-route-0001",
+        rate_source_id="test-underwriter::standard_PPA",
+        status=Status.QUOTED_COMPARABLE,
+        comparability=Comparability.IDENTICAL_BASIS,
+        requested_basis_id="basis-test-0001",
+        lines=[unknown_line(dim) for dim in REQUESTABLE_DIMENSIONS],
+        binding_basis="bound_offer",
+        premium=NormalizedPremium(annual_premium_cad=1500.0, payment_basis="annual", term_months=12),
+        validity=NormalizedValidity(
+            quote_or_reference_id="TEST-REF-0001",
+            effective_date=date(2026, 8, 9),
+            expiry_or_guarantee_date=date(2026, 9, 8),
+            verification_may_change_premium=False,
+        ),
+        discounts=[],
+        confidence="high",
+        normalization_warnings=[],
+        captured_at=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+        evidence_ids=["evd-0001"],
+    )
+    data.update(overrides)
+    return NormalizedQuote(**data)

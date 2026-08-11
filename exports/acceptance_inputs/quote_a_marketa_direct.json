@@ -1,0 +1,77 @@
+{
+  "quote_result": {
+    "source": {
+      "registry_id": "demo-marketa-001",
+      "brand_or_program": "Marketa Direct",
+      "legal_underwriter": "Marketa Insurance Company",
+      "insurer_group": "Marketa Group",
+      "licensed_intermediary": null,
+      "distinct_rate_source_id": "marketa-insurance-company::standard_PPA"
+    },
+    "outcome": {
+      "status": "quoted_comparable",
+      "is_exact_quote": true,
+      "failure_reason": null,
+      "next_action": null
+    },
+    "coverage": {"requested": {}, "returned": {}, "variance_from_benchmark": []},
+    "discounts": {"applied": ["winter_tires"], "available_not_selected": ["telematics"], "conditional": []},
+    "validity": {
+      "quote_reference_id": "MKTA-REF-88213",
+      "effective_date": "2026-09-01",
+      "expiry_date": "2026-10-01",
+      "verification_may_change_premium": false
+    },
+    "evidence": {
+      "timestamp": "2026-08-11T14:00:00Z",
+      "source_url_or_phone": "https://marketa.example.invalid/quote",
+      "evidence_artifact": "data/evidence/demo-marketa-001/quote.png",
+      "evidence_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "confidence": "high",
+    "privacy": {"fields_disclosed": ["make", "model", "model_year"], "consent_receipt_id": null, "retention_deadline": null},
+    "price": {
+      "annual_premium": 1850.0,
+      "monthly_amount": null,
+      "down_payment": null,
+      "instalment_fee": null,
+      "taxes_fees": 92.5,
+      "total_estimated": 1942.5,
+      "currency": "CAD"
+    }
+  },
+  "observations": [
+    {
+      "source_label": "Liability - Bodily Injury & Property Damage",
+      "source_value": "$1,000,000",
+      "captured_at": "2026-08-11T14:00:00Z",
+      "evidence_id": "evd-marketa-001"
+    },
+    {
+      "source_label": "Collision Coverage",
+      "source_value": "$500 ded.",
+      "captured_at": "2026-08-11T14:00:00Z",
+      "evidence_id": "evd-marketa-001"
+    },
+    {
+      "source_label": "Direct Compensation - Property Damage",
+      "source_value": "Excluded",
+      "captured_at": "2026-08-11T14:00:00Z",
+      "evidence_id": "evd-marketa-001"
+    },
+    {
+      "source_label": "Family Protection Coverage (OPCF 44R)",
+      "source_value": "Included",
+      "captured_at": "2026-08-11T14:00:00Z",
+      "evidence_id": "evd-marketa-001"
+    },
+    {
+      "source_label": "Death Benefit",
+      "source_value": "Not offered by this insurer",
+      "captured_at": "2026-08-11T14:00:00Z",
+      "evidence_id": "evd-marketa-001"
+    }
+  ],
+  "distribution_type": "direct",
+  "evidence_ids": ["evd-marketa-001"]
+}
