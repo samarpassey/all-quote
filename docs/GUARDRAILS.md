@@ -110,3 +110,28 @@ Works only for the participant's own insurance shopping.
   and evidence artifact are correct for the page reached; the reason string
   is imprecise. Tightening this requires matching prose and control within
   the same DOM subtree.
+- Same class, second occurrence: a live Task 7 Phase 2 probe run against
+  Allstate Canada's homepage produced a `blocked` (login_or_account_required)
+  status matched against site-wide account/nav chrome ("Sign in if you
+  already have an account", "Create an account") rather than a quote-flow
+  login wall — the captured evidence screenshot shows the plain marketing
+  homepage with a cookie-consent popup, no evidence the run ever reached or
+  attempted the "get a quote" journey. Not fixed for the same reason as the
+  sonnet.ca case: no time before the deadline to tighten gate-region scoping
+  without risking the 204 passing tests. Practical consequence: some
+  fraction of batch outcomes carrying a `blocked` status may be attributable
+  to this detector over-matching site chrome rather than a real barrier, not
+  to the market itself. Read a `blocked` result's evidence screenshot before
+  treating it as a confirmed barrier.
+- Distinct bug, same probe round: rates.ca and lowestrates.ca both returned a
+  Cloudflare "Sorry, you have been blocked — this website is using a
+  security service to protect itself" interstitial, which gates.py's
+  `hard_ineligibility` pattern matched, producing status `ineligible`. That
+  is a misclassification, not a scoping imprecision — `ineligible` asserts
+  "the profile fails a product rule," but the evidence shows an anti-bot
+  wall, which is `blocked` (captcha_or_bot_check) by definition. Any batch
+  outcome recorded as `ineligible` from these two routes (or any route
+  matching similar "blocked"/"access denied"/"security service" phrasing)
+  should be read as `blocked` until gates.py's hard_ineligibility pattern is
+  tightened to exclude bot-wall language. Not fixed now, same time
+  constraint as the two entries above.

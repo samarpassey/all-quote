@@ -109,9 +109,25 @@ _Source = Literal["dom", "text"]
 _LOGIN_VERB = r"(?:sign in|log in|create|register|set up)"
 _LOGIN_NOUN = r"(?:an? )?(?:account|login|profile)"
 _INELIG_NEGATION = r"(?:unable|not able|can'?t|cannot|unfortunately)"
-_INELIG_OUTCOME = r"(?:quote|rate|coverage|offer)"
+# \b-bounded: without it, "rate" as a bare substring matches inside a brand
+# name like "rates.ca" or "lowestrates.ca" — the actual bug behind a real
+# Cloudflare bot-wall ("You are unable to access rates.ca") being
+# misclassified as hard_ineligibility instead of captcha_or_bot_check. See
+# docs/GUARDRAILS.md Known Limitations for the incident this fixes.
+_INELIG_OUTCOME = r"\b(?:quote|rate|coverage|offer)\b"
 _INELIG_CUE = r"(?:not eligible|required? to continue|requirement to continue|does not meet|unable|not able|cannot)"
 _VERIFY_WORD = r"(?:verify|verification|confirm your identity)"
+# Bot/access-control interstitial vocabulary — full-page "you were blocked"
+# walls (Cloudflare and equivalent), distinct from the structural CAPTCHA
+# widget detection above: this is unambiguous block-page prose, not a
+# script-tag/library-reference false-positive risk (see module docstring).
+_BOT_WALL_BLOCKED = r"you (?:have been|were) blocked"
+_BOT_WALL_SECURITY_SERVICE = r"security service to protect"
+_BOT_WALL_VERIFY_FAILED = r"(?:anti-?bot )?verification failed"
+_BOT_WALL_CHECKING_BROWSER = r"checking your browser"
+_BOT_WALL_ATTENTION = r"attention required"
+_BOT_WALL_RAY_ID = r"\bray id\b"
+_BOT_WALL_CLOUDFLARE = r"\bcloudflare\b"
 
 # One entry per gate kind, in priority order (first hit wins). Each pattern
 # is a (surface, pattern, dom_label) triple: "text" runs against page_text
@@ -133,6 +149,17 @@ _GATE_PATTERNS: dict[GateKind, list[tuple[_Source, re.Pattern[str], str | None]]
         ("text", re.compile(r"verify you(?:'re| are) human", re.I), None),
         ("text", re.compile(r"unusual traffic from your (?:network|computer)", re.I), None),
         ("text", re.compile(r"\bcaptcha\b", re.I), None),
+        # Full-page bot-wall interstitials (Cloudflare and equivalent) —
+        # this kind is highest priority, so any of these firing pre-empts
+        # hard_ineligibility even if a page's copy happens to also contain
+        # ineligibility-shaped wording.
+        ("text", re.compile(_BOT_WALL_BLOCKED, re.I), None),
+        ("text", re.compile(_BOT_WALL_SECURITY_SERVICE, re.I), None),
+        ("text", re.compile(_BOT_WALL_VERIFY_FAILED, re.I), None),
+        ("text", re.compile(_BOT_WALL_CHECKING_BROWSER, re.I), None),
+        ("text", re.compile(_BOT_WALL_ATTENTION, re.I), None),
+        ("text", re.compile(_BOT_WALL_RAY_ID, re.I), None),
+        ("text", re.compile(_BOT_WALL_CLOUDFLARE, re.I), None),
     ],
     "login_or_account_required": [
         # verb-then-noun ("create an account", "set up a login") and

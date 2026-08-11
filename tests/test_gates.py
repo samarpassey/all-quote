@@ -387,6 +387,89 @@ def test_evidence_snippet_capped_at_200_chars():
     assert len(hit.evidence_snippet) <= 200
 
 
+# --- bot-wall detection: hard_ineligibility misclassification fix ----------
+#
+# Root cause (confirmed against the real Task 7 Phase 2 probe evidence at
+# data/evidence/98a89c129648/attempt-1/ and data/evidence/4ed2deb6e253/attempt-1/):
+# hard_ineligibility's negation-near-outcome pattern used a bare "rate"
+# alternative with no \b word boundary, so "You are unable to access
+# rates.ca" matched "unable ... rate" as a substring of the SITE'S OWN
+# DOMAIN NAME, not any real ineligibility language. Both fixtures below are
+# the literal wall text from those two captures, not a paraphrase — this is
+# a regression test for an incident that actually happened, not a
+# hypothetical.
+
+
+def test_bot_wall_cloudflare_block_fixture_is_blocked_not_ineligible():
+    hit = _detect(text=_fixture_text("bot_wall_cloudflare_rates_ca.html"))
+    assert hit is not None
+    assert hit.kind == "captcha_or_bot_check"
+
+
+def test_bot_wall_surex_antibot_banner_fixture_is_blocked():
+    # The real Surex probe run only reached `blocked` via a voluntary LLM
+    # halt (no independent gate match) — this proves a deterministic
+    # detector hit is now reachable for the same page text, which is
+    # stronger evidence than the model naming it.
+    hit = _detect(text=_fixture_text("bot_wall_surex_antibot.html"))
+    assert hit is not None
+    assert hit.kind == "captcha_or_bot_check"
+
+
+def test_bot_wall_generalizes_to_unseen_cloudflare_challenge_wording():
+    # Different real-world Cloudflare challenge copy from the two captures
+    # above (the "checking your browser" interstitial, not the "you have
+    # been blocked" wall) — proves the detector isn't just grepping the two
+    # literal captures.
+    hit = _detect(
+        text="Checking your browser before accessing example.com. "
+        "This process is automatic. Ray ID: 8f3a9c1b2d4e5f6a Performance & "
+        "security by Cloudflare"
+    )
+    assert hit is not None
+    assert hit.kind == "captcha_or_bot_check"
+
+
+def test_genuine_ineligibility_fixture_still_returns_ineligible_not_blocked():
+    # The existing hard_ineligibility fixture (real product-rule rejection
+    # language) must be unaffected by the bot-wall additions or the \b fix.
+    hit = _detect(text=_fixture_text("ineligible.html"))
+    assert hit is not None
+    assert hit.kind == "hard_ineligibility"
+
+
+def test_page_with_both_ineligibility_and_bot_wall_phrasing_returns_blocked():
+    # Ordering proof: captcha_or_bot_check is priority-first, so when a page
+    # contains both an ineligibility phrase and bot-wall phrasing, the wall
+    # wins — an access-control wall is a fact about the page; an
+    # ineligibility is a fact about the profile, and we never got far enough
+    # for a profile judgement to have occurred.
+    hit = _detect(
+        text="A G2 or full G licence is required to continue. We aren't "
+        "able to provide a rate for a G1 licence at this time. Sorry, you "
+        "have been blocked: this website is using a security service to "
+        "protect itself."
+    )
+    assert hit is not None
+    assert hit.kind == "captcha_or_bot_check"
+
+
+def test_ineligibility_outcome_word_boundary_does_not_match_domain_substring():
+    # Isolates the root-cause fix from the new bot-wall patterns: on its
+    # own, with none of the new bot-wall vocabulary present, "unable to
+    # access rates.ca" must not fire hard_ineligibility (or anything else)
+    # via a bare, unbounded "rate" substring match.
+    hit = _detect(text="You are unable to access rates.ca right now, please try again.")
+    assert hit is None
+
+
+def test_ineligibility_outcome_word_boundary_still_matches_whole_word():
+    # The \b fix must not remove genuine whole-word matches.
+    hit = _detect(text="Unfortunately we are unable to provide a rate for this vehicle.")
+    assert hit is not None
+    assert hit.kind == "hard_ineligibility"
+
+
 def test_gates_module_has_no_browser_use_import():
     assert "browser_use" not in GATES_SRC
 
