@@ -502,6 +502,13 @@ class _LoadingPage:
     async def evaluate(self, expression: str, *args: object) -> object:
         if "readyState" in expression:
             return self.ready_state
+        # _ACTIVE_REGION_JS itself contains the substring "innerText" (as
+        # part of `container.innerText`), so it must be matched on its own
+        # unique marker ("hasContainer") BEFORE the generic "innerText"
+        # check below, or it would wrongly be treated as the plain
+        # `document.body.innerText` call.
+        if "hasContainer" in expression:
+            return {"hasContainer": True, "text": "are you a robot", "hasBlockingControl": False}
         if "innerText" in expression:
             return "are you a robot"
         if "outerHTML" in expression:
@@ -670,6 +677,70 @@ def test_step_hook_gates_on_real_consent_checkbox(fixture_server, tmp_path):
             assert len(gate_box) == 1
             assert gate_box[0].kind == "consent_or_terms_required"
             assert agent_box[0].stop_calls == 1
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+# --- readyState=="complete" is not enough: a JS app can report complete ----
+# --- before it has hydrated any form. No active region -> skip detection. --
+#
+# blank_hydrating_page.html reproduces the live sonnet.ca failure exactly:
+# a static shell that finishes loading (readyState reaches "complete"
+# immediately, no pending script) but has zero interactive controls
+# anywhere -- no form has been client-rendered yet -- plus a footer already
+# containing the Tangerine consent prose. The old _ACTIVE_REGION_JS treated
+# "zero candidates" as "fall back to document.body.innerText", which is
+# exactly how the footer text reached the detector despite active-region
+# scoping existing. The fix: zero candidates means no container, and no
+# container means detection is skipped for the step entirely -- same as
+# the readyState check -- never a fallback scan of the whole page.
+
+
+def test_scan_active_region_returns_none_when_page_has_no_interactive_controls(fixture_server):
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("blank_hydrating_page.html"))
+            await _wait_until_ready(session)
+
+            region = await browser_ops.scan_active_region(page)
+            assert region is None
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_step_hook_skips_detection_on_blank_hydrating_page_with_footer_consent_prose(fixture_server, tmp_path):
+    # The exact live-path reproduction: readyState complete, no form/controls
+    # yet, footer consent prose already present. Detection must be skipped,
+    # not fired -- if this regresses to firing, it is the same bug the fix
+    # was for, just reached through the "zero candidates" path instead of
+    # the earlier "footer excluded from a real container" path.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("blank_hydrating_page.html"))
+            await _wait_until_ready(session)
+
+            ready_state = await page.evaluate("() => document.readyState")
+            assert ready_state == "complete"
+
+            gate_box: list[gates.GateHit] = []
+            agent_box = [_FakeAgent()]
+            hook = browser_ops.make_step_hook(
+                profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+            )
+            await hook(_StateStub(fixture_server.url_for("blank_hydrating_page.html")), None, 1)
+
+            assert gate_box == []
+            assert agent_box[0].stop_calls == 0
         finally:
             await session.stop()
 

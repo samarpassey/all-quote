@@ -317,6 +317,21 @@ async def scan_captcha_structural_hits(page: Any) -> list[str]:
 # disclaimer classes from the candidate set before computing that container.
 # gates.detect()'s text patterns run against ITS innerText, never the whole
 # page's.
+#
+# Zero candidates — a blank page, a JS app mid-hydration — is reported as
+# `hasContainer: false`, never a fallback scan of document.body.innerText.
+# document.readyState can report "complete" before a client-rendered app has
+# painted anything (the app's own shell finished loading; nothing has
+# hydrated yet), which is exactly how a page with zero real controls but an
+# already-server-rendered footer produced a false positive even after
+# scoping existed: the old fallback branch here scanned the whole page
+# specifically BECAUSE there was nothing to scope to yet. `make_step_hook`
+# now skips gate detection entirely for the step when `hasContainer` is
+# false — same as the readyState skip: no container means nothing to gate
+# on yet, not "fall back and scan anyway". (A container that isn't a <form>
+# — e.g. checkbox-and-button siblings with no wrapping <form>, a common
+# small-interstitial shape — legitimately can be document.body itself; that
+# is not the bug this guards against and is left alone.)
 _ACTIVE_REGION_JS = r"""
 () => {
     const EXCLUDE_SELECTOR = 'footer, nav, [role="contentinfo"], .promo, .promotion, ' +
@@ -340,14 +355,27 @@ _ACTIVE_REGION_JS = r"""
         return false;
     };
 
+    const NO_CONTAINER = { hasContainer: false };
+
     const candidates = Array.from(
         document.querySelectorAll('input, select, textarea, button, [role="button"]')
     ).filter((el) => !isExcluded(el) && inViewport(el.getBoundingClientRect()));
 
     if (candidates.length === 0) {
-        // Nothing to scope to (e.g. a pure informational/error page) --
-        // the whole body is the only reasonable region.
-        return { text: document.body.innerText || "", hasBlockingControl: false };
+        // Two different things look identical from "zero candidates" alone:
+        // a genuine single-purpose informational/terminal page (no form was
+        // ever going to exist — e.g. an ineligibility or maintenance
+        // notice, where the whole body IS the content) vs. a JS app whose
+        // shell chrome (footer/nav/promo) has already server-rendered but
+        // whose actual form hasn't hydrated yet. Whether any excluded-chrome
+        // element exists at all is what tells them apart: if one does, this
+        // is the loading state, not a real terminal page — skip rather than
+        // scan whatever boilerplate happens to already be on screen.
+        const hasExcludedChrome = document.querySelector(EXCLUDE_SELECTOR) !== null;
+        if (hasExcludedChrome) {
+            return NO_CONTAINER;
+        }
+        return { hasContainer: true, text: document.body.innerText || "", hasBlockingControl: false };
     }
 
     // Prefer an explicit <form> that contains the majority of candidates.
@@ -382,6 +410,7 @@ _ACTIVE_REGION_JS = r"""
     const hasRequiredInput = container.querySelectorAll("input[required], select[required], textarea[required]").length > 0;
 
     return {
+        hasContainer: true,
         text: container.innerText || "",
         hasBlockingControl: hasUncheckedCheckbox || hasRequiredInput,
     };
@@ -389,24 +418,21 @@ _ACTIVE_REGION_JS = r"""
 """
 
 
-async def scan_active_region(page: Any) -> tuple[str, bool]:
-    """Returns (active_region_text, has_blocking_control) — see
-    `_ACTIVE_REGION_JS`. Falls back to (document.body.innerText, False) on
-    any evaluate failure, same fail-open-to-full-page-text behaviour the
-    caller already had before this scoping existed, rather than blocking
-    detection outright on a transient evaluate error.
+async def scan_active_region(page: Any) -> tuple[str, bool] | None:
+    """Returns (active_region_text, has_blocking_control), or None when no
+    meaningful active region exists yet — see `_ACTIVE_REGION_JS`. None
+    means "skip gate detection for this step", exactly like the readyState
+    check; it is NEVER a signal to fall back to document.body.innerText,
+    which would silently undo the scoping this function exists to provide.
+    A page.evaluate() failure is treated the same way, for the same reason.
     """
     try:
         raw_result = await page.evaluate(_ACTIVE_REGION_JS)
         result = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
     except Exception:
-        try:
-            fallback_text = await page.evaluate("() => document.body.innerText")
-        except Exception:
-            return "", False
-        return fallback_text, False
-    if not result:
-        return "", False
+        return None
+    if not result or not result.get("hasContainer"):
+        return None
     return result.get("text", "") or "", bool(result.get("hasBlockingControl"))
 
 
@@ -506,7 +532,18 @@ def make_step_hook(
             # fires again on the next step once the page has settled.
             return
 
-        active_text, blocking_control_present = await scan_active_region(page)
+        region = await scan_active_region(page)
+        if region is None:
+            # readyState alone is not enough: a client-rendered app can
+            # report "complete" before it has hydrated anything (no form,
+            # no visible interactive controls yet — a blank page). No
+            # active region means nothing can be gating us; skip detection
+            # entirely for this step rather than falling back to whatever
+            # boilerplate the shell has already server-rendered (a footer's
+            # promo text, in the case this guards against). The next step
+            # re-checks once the page has actually rendered a form.
+            return
+        active_text, blocking_control_present = region
 
         try:
             dom = await page.evaluate("() => document.documentElement.outerHTML")
