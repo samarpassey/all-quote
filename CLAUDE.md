@@ -42,9 +42,7 @@ introduce a colour, typeface, radius or shadow not listed there.
   retry a CAPTCHA, rejection, or terms block — record status `blocked` and stop.
 - NEVER write CAPTCHA-solving, bot-detection-evasion, user-agent-spoofing, or
   auth-bypass code. Not even stubs, not even behind flags.
-- Executors MUST stop and raise `HumanCheckpointRequired` before any: identity or
-  database lookup, consent attestation, declaration, signature, payment, or purchase
-  step. No auto-clicking through consent.
+- Executors never raise for market outcomes. A human checkpoint is a terminal status (manual_handoff, callback_required) with evidence, not an exception — this lets a batch run continue past one blocked market. Checkpoints are enforced by deterministic gate detection in gates.py, which halts the run before any consent, identity, declaration or payment step.
 - No payment fields are ever filled. No policy is ever bound.
 - Voice: first sentence of every call discloses automation. No recording without
   affirmative consent. One call + one retry only if line fails before connect.

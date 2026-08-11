@@ -87,3 +87,17 @@ Works only for the participant's own insurance shopping.
 - The vault's Fernet key (vault.py) is derived from `VAULT_KEY` via a single
   SHA-256 pass, not a proper password-KDF (PBKDF2/scrypt). Acceptable for a
   personal single-user hackathon vault; not production-grade key derivation.
+- The browser executor's `sensitive_data` dict (browser_ops.py, Task 5) is
+  populated lazily, at the moment `fill_sensitive` resolves a value from the
+  vault — intentional, to minimize how long plaintext exists anywhere and to
+  keep the vault-resolution point single and explicit. The consequence: a
+  sensitive value already on the page before our own code types it (browser
+  autofill, a resumed session, a site-prefilled field) is not covered by
+  native `sensitive_data` filtering on the step it first appears, since
+  nothing has registered it yet. `redact_text` at evidence-write time still
+  catches it before anything reaches disk; the residual exposure is limited
+  to that one LLM API call in transit for that one step. This is not closed
+  by eagerly pre-resolving the whole vault at run start — that would defeat
+  the resolve-at-fill-time design for a narrow, low-probability edge case
+  (this executor never auto-fills from a prior session, and always fills
+  fields itself).
