@@ -494,14 +494,20 @@ def test_step_hook_does_not_gate_on_recaptcha_v3_badge(fixture_server, tmp_path)
 class _LoadingPage:
     """Stub page whose text/dom, if evaluated, would gate — proving the
     readyState check is what's suppressing detection, not an absence of a
-    trigger phrase."""
+    trigger phrase. Always reports a live URL matching "http://example.invalid"
+    (the same URL these tests pass as browser_state_summary.url), so the
+    URL-consistency checks in _step_hook never themselves cause the skip —
+    only ready_state does."""
 
     def __init__(self, ready_state: str):
         self.ready_state = ready_state
 
     async def evaluate(self, expression: str, *args: object) -> object:
-        if "readyState" in expression:
-            return self.ready_state
+        # _PAGE_STATE_JS is the combined url+readyState read _step_hook now
+        # uses; it must be matched on its own unique marker
+        # ("window.location.href") before any other check below.
+        if "window.location.href" in expression:
+            return {"url": "http://example.invalid", "readyState": self.ready_state}
         # _ACTIVE_REGION_JS itself contains the substring "innerText" (as
         # part of `container.innerText`), so it must be matched on its own
         # unique marker ("hasContainer") BEFORE the generic "innerText"
@@ -563,6 +569,130 @@ def test_step_hook_runs_detection_once_page_reports_complete(tmp_path):
         assert len(gate_box) == 1
         assert gate_box[0].kind == "captcha_or_bot_check"
         assert agent_box[0].stop_calls == 1
+
+    _run(body())
+
+
+# --- navigation in flight: detection must never read a mid-transition page -
+#
+# The byte-identical-screenshot bug: readyState and active-region content
+# both looked valid, but they belonged to the page the agent was navigating
+# AWAY from, not the one browser-use's own state summary said was current.
+# Two independent guards, tested separately below: (1) this step's URL vs.
+# the previous step's (make_step_hook's own `previous_url` tracking), and
+# (2) the page handle's live URL vs. what browser_state_summary claims for
+# THIS step (a stub, since reliably reproducing a real intra-step
+# navigation race against a local fixture server — which loads almost
+# instantly — isn't practical).
+
+
+class _StableContentPage:
+    """Stub page that is always "ready" with gate-triggering content at a
+    configurable live URL. Used to prove a skip comes from the URL checks
+    themselves, not from readyState or an absence of a trigger phrase —
+    every other signal here would obviously fire if reached."""
+
+    def __init__(self, live_url: str):
+        self.live_url = live_url
+
+    async def evaluate(self, expression: str, *args: object) -> object:
+        if "window.location.href" in expression:
+            return {"url": self.live_url, "readyState": "complete"}
+        if "hasContainer" in expression:
+            return {"hasContainer": True, "text": "are you a robot", "hasBlockingControl": False}
+        if "outerHTML" in expression:
+            return "<html></html>"
+        return []
+
+
+class _StableContentSession:
+    def __init__(self, page: _StableContentPage):
+        self._page = page
+
+    async def must_get_current_page(self) -> _StableContentPage:
+        return self._page
+
+
+def test_step_hook_skips_detection_when_live_url_disagrees_with_state_summary_url(tmp_path):
+    # The page handle's own live URL and browser_state_summary.url can
+    # disagree within a single step (each captured at a slightly different
+    # time) -- caught independently of the cross-step previous_url check.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        # The live page is still on the OLD url ("outgoing") even though
+        # browser-use's state summary already reports the NEW one -- the
+        # exact shape of "read the outgoing page's DOM while navigation was
+        # in flight".
+        page = _StableContentPage(live_url="http://example.invalid/page-a")
+        session = _StableContentSession(page)
+
+        gate_box: list[gates.GateHit] = []
+        agent_box = [_FakeAgent()]
+        hook = browser_ops.make_step_hook(
+            profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+        )
+        await hook(_StateStub("http://example.invalid/page-b"), None, 1)
+
+        assert gate_box == []
+        assert agent_box[0].stop_calls == 0
+
+    _run(body())
+
+
+def test_step_hook_skips_detection_on_url_transition_step(fixture_server, tmp_path):
+    # The user-requested reproduction: two sequential hook calls where the
+    # URL changes between them, with gate-prose in the FIRST page's own
+    # footer (footer_promo_consent.html — already excluded by active-region
+    # scoping regardless, so it never fires either way; it's here only to
+    # match the real-world shape of the bug report, an actual page with
+    # actual footer prose). Detection must be skipped on the transition
+    # step (2), then run normally once settled (3) on a page that genuinely
+    # gates (real_consent_gate.html).
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            url_a = fixture_server.url_for("footer_promo_consent.html")
+            url_b = fixture_server.url_for("real_consent_gate.html")
+
+            await page.goto(url_a)
+            await _wait_until_ready(session)
+
+            gate_box: list[gates.GateHit] = []
+            agent_box = [_FakeAgent()]
+            hook = browser_ops.make_step_hook(
+                profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+            )
+
+            # Step 1: establishes previous_url = url_a. Nothing gates here
+            # regardless (footer scoping), so this doesn't yet prove much
+            # on its own -- steps 2-3 are the actual test.
+            await hook(_StateStub(url_a), None, 1)
+            assert gate_box == []
+
+            # The agent navigates to the real gate page between steps.
+            await page.goto(url_b)
+            await _wait_until_ready(session)
+
+            # Step 2: browser_state_summary now reports url_b -- a URL
+            # change since the previous step -- so this is the transition
+            # step. It must be skipped even though the live page has, in
+            # this test, already fully settled on a page that WOULD gate.
+            await hook(_StateStub(url_b), None, 2)
+            assert gate_box == []
+            assert agent_box[0].stop_calls == 0
+
+            # Step 3: same URL as step 2 -- no longer a transition. Must
+            # detect normally now.
+            await hook(_StateStub(url_b), None, 3)
+            assert len(gate_box) == 1
+            assert gate_box[0].kind == "consent_or_terms_required"
+            assert agent_box[0].stop_calls == 1
+        finally:
+            await session.stop()
 
     _run(body())
 

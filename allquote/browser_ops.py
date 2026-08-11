@@ -487,6 +487,23 @@ async def scroll_text_into_view(browser_session: BrowserSession, needle: str) ->
 
 
 # --- deterministic gate step hook -------------------------------------------
+#
+# A byte-identical evidence screenshot across separate runs turned out to be
+# a step-boundary race, not a caching bug: by the time the hook read the
+# DOM, the agent had already clicked through to the next page, but the read
+# landed on the OUTGOING document mid-navigation (readyState "complete" on
+# the page about to be replaced, not the one actually current). Two checks
+# below guard this, independent of and in addition to the existing
+# readyState/active-region checks (which stay exactly as they were):
+# comparing this step's URL to the previous step's (a navigation was
+# observed since last time -> skip this transition step), and comparing the
+# page handle's own live URL to what browser-use's state summary claims the
+# current URL is (the two can independently race a navigation within a
+# single step) — both must agree before readyState is even consulted, and
+# readyState itself is read from the SAME evaluate() call as that live URL
+# so it can never describe a different document than the one just checked.
+
+_PAGE_STATE_JS = "() => ({ url: window.location.href, readyState: document.readyState })"
 
 
 def make_step_hook(
@@ -513,16 +530,41 @@ def make_step_hook(
     `build_tools`.
     """
 
+    previous_url: str | None = None
+
     async def _step_hook(browser_state_summary: Any, agent_output: Any, step_number: int) -> None:
+        nonlocal previous_url
         if gate_box:
             return
 
         url = getattr(browser_state_summary, "url", "")
 
+        # (1) A navigation was observed since the last step -- reading the
+        # DOM right now risks landing on the outgoing page while the new
+        # one is still loading. previous_url is updated regardless of
+        # whether this step is skipped, so the check is always against the
+        # immediately preceding step, and a stable run of same-URL steps
+        # naturally clears it after one skip.
+        navigated_since_last_step = previous_url is not None and url != previous_url
+        previous_url = url
+        if navigated_since_last_step:
+            return
+
         try:
             page = await browser_session.must_get_current_page()
-            ready_state = await page.evaluate("() => document.readyState")
+            raw_page_state = await page.evaluate(_PAGE_STATE_JS)
+            page_state = json.loads(raw_page_state) if isinstance(raw_page_state, str) else raw_page_state
         except Exception:
+            return
+
+        live_url = (page_state or {}).get("url", "")
+        ready_state = (page_state or {}).get("readyState", "")
+
+        # (2) Within this single step, the page handle's own live URL and
+        # what browser-use's state summary says the current URL is can
+        # still disagree (each was captured at a slightly different time) —
+        # that's navigation in flight too, caught independently of (1).
+        if live_url != url:
             return
 
         if ready_state != "complete":
