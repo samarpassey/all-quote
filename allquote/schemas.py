@@ -355,6 +355,9 @@ EvidenceKind = Literal[
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 
+Provenance = Literal["observed", "derived"]
+
+
 class EvidenceRecord(BaseModel):
     evidence_id: str
     registry_id: str
@@ -364,6 +367,7 @@ class EvidenceRecord(BaseModel):
     artifact_path: str
     evidence_hash: str
     redacted: bool
+    provenance: Provenance
     fields_disclosed: list[str] = Field(default_factory=list)
     consent_receipt_id: str | None = None
     retention_deadline: datetime | None = None

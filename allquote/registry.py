@@ -91,6 +91,17 @@ def list_records(db_path: Path = DB_PATH) -> list[MarketRecord]:
         conn.close()
 
 
+def get_record(registry_id: str, db_path: Path = DB_PATH) -> MarketRecord | None:
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            f"SELECT payload FROM {_TABLE} WHERE registry_id = ?", (registry_id,)
+        ).fetchone()
+        return MarketRecord.model_validate_json(row[0]) if row is not None else None
+    finally:
+        conn.close()
+
+
 @dataclass
 class RegistryStats:
     total_rows: int

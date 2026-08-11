@@ -200,6 +200,7 @@ def build_evidence_record(**overrides) -> EvidenceRecord:
         artifact_path="data/evidence/test-route-0001/quote.png",
         evidence_hash="a" * 64,
         redacted=True,
+        provenance="observed",
         fields_disclosed=["make", "model"],
         consent_receipt_id=None,
         retention_deadline=None,

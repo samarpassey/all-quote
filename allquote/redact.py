@@ -9,6 +9,7 @@ can over-redact benign look-alike strings — accepted tradeoff, never the rever
 See docs/GUARDRAILS.md known limitations.
 """
 
+import io
 import json
 import re
 from collections.abc import Iterator
@@ -24,7 +25,7 @@ from allquote.schemas import IntakeProfile, VaultRef, sensitive_fields
 
 # --- shape-based patterns (independent of any profile) -------------------------
 
-_SHAPE_PATTERNS: dict[str, re.Pattern[str]] = {
+SHAPE_PATTERNS: dict[str, re.Pattern[str]] = {
     "postal_code": re.compile(r"\b[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d\b"),
     "phone": re.compile(r"(?<!\d)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)"),
     "licence_number": re.compile(r"\b[A-Za-z]\d{4}-?\d{5}-?\d{5}\b"),
@@ -37,13 +38,13 @@ _SHAPE_PATTERNS: dict[str, re.Pattern[str]] = {
 
 def _apply_shape_patterns(text: str) -> str:
     redacted = text
-    for label, pattern in _SHAPE_PATTERNS.items():
+    for label, pattern in SHAPE_PATTERNS.items():
         redacted = pattern.sub(f"[REDACTED:{label}]", redacted)
     return redacted
 
 
 def _looks_like_value(s: str) -> bool:
-    return any(pattern.search(s) for pattern in _SHAPE_PATTERNS.values())
+    return any(pattern.search(s) for pattern in SHAPE_PATTERNS.values())
 
 
 # --- profile-driven redaction ----------------------------------------------------
@@ -51,7 +52,7 @@ def _looks_like_value(s: str) -> bool:
 _PROFILE_GROUPS = ("identity", "contact", "address", "licence", "vehicle", "history")
 
 
-def _iter_profile_refs(profile: IntakeProfile) -> Iterator[tuple[str, VaultRef]]:
+def iter_profile_refs(profile: IntakeProfile) -> Iterator[tuple[str, VaultRef]]:
     for group_name in _PROFILE_GROUPS:
         group = getattr(profile, group_name)
         if group is None:
@@ -81,7 +82,7 @@ def redact_text(
     vault_key: str | None = None,
 ) -> str:
     redacted = _apply_shape_patterns(text)
-    for field_name, ref in _iter_profile_refs(profile):
+    for field_name, ref in iter_profile_refs(profile):
         value = vault.resolve(ref, vault_path=vault_path, vault_key=vault_key)
         redacted = _replace_literal(redacted, value, field_name)
     return redacted
@@ -91,15 +92,19 @@ def redact_text(
 
 
 def redact_image(
-    image_path: Path,
+    image_source: Path | bytes,
     boxes: list[tuple[int, int, int, int]],
     *,
     output_path: Path,
 ) -> Path:
     """Black-fill explicit (left, top, right, bottom) boxes. No OCR, no
     auto-detection — boxes are the caller's responsibility.
+
+    `image_source` may be a `Path` (existing on-disk image) or raw `bytes`
+    (an in-memory screenshot that must never be written to disk unredacted —
+    Task 5's executor captures screenshots this way).
     """
-    img = Image.open(image_path)
+    img = Image.open(io.BytesIO(image_source)) if isinstance(image_source, bytes) else Image.open(image_source)
     if img.mode != "RGB":
         img = img.convert("RGB")
     draw = ImageDraw.Draw(img)
@@ -119,7 +124,7 @@ class RedactionNotAppliedError(RuntimeError):
 
 
 def safe_write_evidence(
-    payload: str | Path,
+    payload: str | Path | bytes,
     kind: Literal["text", "image"],
     destination: Path,
     *,

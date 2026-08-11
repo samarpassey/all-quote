@@ -99,7 +99,13 @@ Written by `evidence.py` (Task 4) on every save. One row per artifact: evidence_
 call_transcript, call_outcome, consent_receipt, document}, timestamp (ISO 8601
 UTC), source_url_or_phone, artifact_path (relative, under data/evidence/),
 evidence_hash (sha256 hex digest of the artifact), redacted (bool — must be true
-before any disk write), fields_disclosed[] (plain field NAMES only, never
+before any disk write), provenance ∈ {observed, derived} — observed means this
+evidence came from actually contacting the market (a page was loaded, a
+screenshot was captured, a live response was read); derived means it's a
+conclusion from our own registry metadata with no contact made (e.g. a route
+with no automatable channel on file). This distinction matters because a
+derived record and an observed record must never be presented or counted as
+equivalent evidence — fields_disclosed[] (plain field NAMES only, never
 values), consent_receipt_id (nullable), retention_deadline (nullable). The last
 four fields mirror QuoteResult's privacy group and back the evidence drill-down
 view and the one-click delete-all flow (see docs/GUARDRAILS.md retention rules).
