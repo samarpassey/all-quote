@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head><title>Get a quote - step 1 of 3</title></head>
+<body>
+  <h1>Vehicle details</h1>
+  <form action="happy_path_step2.html" method="get">
+    <label for="make">Vehicle make</label>
+    <input id="make" name="make" type="text">
+    <button type="submit" id="next">Next</button>
+  </form>
+
+  <!-- reCAPTCHA v3's mandatory attribution badge: invisible, score-based,
+       no challenge -- present on the majority of commercial sites. Real
+       Google markup nests an iframe (also pointing at recaptcha/api2/anchor)
+       inside a ".grecaptcha-badge" container with data-size="invisible" on
+       the iframe itself, at roughly 70x60. -->
+  <div class="grecaptcha-badge" data-style="bottomright" style="width:70px;height:60px;position:fixed;bottom:14px;right:14px;">
+    <div class="grecaptcha-logo">
+      <iframe src="/recaptcha/api2/anchor.html?size=invisible" data-size="invisible"
+              title="reCAPTCHA" width="70" height="60" role="presentation"
+              frameborder="0" scrolling="no"></iframe>
+    </div>
+  </div>
+  <p class="fine-print">Protected by reCAPTCHA | <a href="#">Privacy</a> | <a href="#">Terms</a></p>
+</body>
+</html>

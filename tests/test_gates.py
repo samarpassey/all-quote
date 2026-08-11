@@ -19,8 +19,20 @@ GATES_SRC = Path("allquote/gates.py").read_text()
 FIXTURES_DIR = Path("tests/fixtures")
 
 
-def _detect(*, text: str = "", dom: str = "") -> gates.GateHit | None:
-    return gates.detect("http://example.invalid/quote", text, dom)
+def _detect(
+    *,
+    text: str = "",
+    dom: str = "",
+    captcha_structural_hits: list[str] | None = None,
+    blocking_control_present: bool = False,
+) -> gates.GateHit | None:
+    return gates.detect(
+        "http://example.invalid/quote",
+        text,
+        dom,
+        captcha_structural_hits=captcha_structural_hits,
+        blocking_control_present=blocking_control_present,
+    )
 
 
 def _fixture_text(name: str) -> str:
@@ -58,18 +70,33 @@ def test_no_hit_on_help_page_about_commercial_ineligibility():
 # --- positive cases, paraphrased away from the detector's own wording -------
 
 
-def test_captcha_dom_markup():
-    # The recaptcha CSS class is the real-world signal itself (that's how a
-    # real widget is identified), not an invented phrase — kept verbatim.
+def test_captcha_structural_hit_fires():
+    # captcha_structural_hits carries plain descriptions of elements a live
+    # page.evaluate already confirmed are actually rendered (see
+    # allquote.browser_ops.scan_captcha_structural_hits) — gates.py itself
+    # never regexes dom_snapshot for recaptcha/hcaptcha/turnstile markup.
+    hit = _detect(captcha_structural_hits=["visible iframe: recaptcha/api2/anchor"])
+    assert hit is not None
+    assert hit.kind == "captcha_or_bot_check"
+    assert hit.evidence_snippet == "visible iframe: recaptcha/api2/anchor"
+
+
+def test_captcha_raw_dom_class_name_alone_does_not_fire():
+    # This is the exact false-positive shape the fix removes: a class name
+    # or script reference sitting in raw dom_snapshot with no confirmation
+    # it's actually rendered must never be enough on its own.
     hit = _detect(dom='<div class="g-recaptcha" data-sitekey="x"></div>')
-    assert hit is not None
-    assert hit.kind == "captcha_or_bot_check"
+    assert hit is None
 
 
-def test_captcha_fixture_file():
-    hit = _detect(text=_fixture_text("captcha.html"), dom=_fixture_text("captcha.html"))
-    assert hit is not None
-    assert hit.kind == "captcha_or_bot_check"
+def test_captcha_script_src_in_dom_does_not_fire():
+    # The actual bug from the first live run: a <script> tag loading the
+    # reCAPTCHA v3 library is not a challenge.
+    hit = _detect(
+        dom='<script src="https://www.gstatic.com/recaptcha/releases/w_x/recaptcha__en.js" '
+        'charset="utf-8"></script>'
+    )
+    assert hit is None
 
 
 def test_login_or_account_required_password_field():
@@ -113,14 +140,15 @@ def test_declaration_attestation_paraphrase():
     hit = _detect(
         text="Submitting this application means you're confirming, under "
         "penalty of insurance fraud, that every answer above is accurate "
-        "and complete."
+        "and complete.",
+        blocking_control_present=True,
     )
     assert hit is not None
     assert hit.kind == "declaration_attestation"
 
 
 def test_consent_or_terms_required_fixture_file():
-    hit = _detect(text=_fixture_text("consent_wall.html"))
+    hit = _detect(text=_fixture_text("consent_wall.html"), blocking_control_present=True)
     assert hit is not None
     assert hit.kind == "consent_or_terms_required"
 
@@ -140,7 +168,7 @@ def test_priority_captcha_wins_over_consent():
     # safety-critical gate always wins over a lower-priority one.
     hit = _detect(
         text="By continuing you authorize us to run a credit check.",
-        dom='<div class="g-recaptcha"></div>',
+        captcha_structural_hits=["visible element: .g-recaptcha"],
     )
     assert hit is not None
     assert hit.kind == "captcha_or_bot_check"
@@ -280,6 +308,83 @@ def test_identity_verification_does_not_fire_on_routine_licence_field():
     # language should fire this gate, never the bare field.
     hit = _detect(text=_fixture_text("happy_path_step2.html"), dom=_fixture_text("happy_path_step2.html"))
     assert hit is None
+
+
+# --- consent/declaration require a blocking control, not just prose --------
+
+
+def test_consent_prose_without_blocking_control_does_not_fire():
+    # The Tangerine-promo-footer shape (footer scoping is a separate,
+    # browser_ops-level fix — this is the second half: even prose that DID
+    # make it into the scanned text must not fire without an accompanying
+    # unchecked checkbox or required input).
+    hit = _detect(text="By continuing you authorize us to run a credit check.")
+    assert hit is None
+
+
+def test_consent_prose_with_blocking_control_fires():
+    hit = _detect(
+        text="By continuing you authorize us to run a credit check.",
+        blocking_control_present=True,
+    )
+    assert hit is not None
+    assert hit.kind == "consent_or_terms_required"
+
+
+def test_declaration_prose_without_blocking_control_does_not_fire():
+    hit = _detect(text="To the best of my knowledge, all of the above is accurate.")
+    assert hit is None
+
+
+def test_blocking_control_requirement_does_not_affect_other_kinds():
+    # The requirement is scoped to consent_or_terms_required and
+    # declaration_attestation specifically -- every other kind must fire
+    # exactly as before regardless of blocking_control_present.
+    hit = _detect(text="We're not yet licensed to sell this product where you live.")
+    assert hit is not None
+    assert hit.kind == "geo_or_region_block"
+
+
+# --- matched_text: the raw fragment used to scroll evidence into view ------
+
+
+def test_matched_text_is_raw_unpadded_fragment():
+    hit = _detect(text="Please provide your driver's licence number to continue.")
+    assert hit is not None
+    assert hit.matched_text.lower() == "driver's licence number"
+    # evidence_snippet is padded with surrounding context; matched_text is not.
+    assert len(hit.matched_text) <= len(hit.evidence_snippet)
+
+
+def test_matched_text_for_dom_hit_equals_its_plain_label():
+    hit = _detect(dom='<input type="password" name="pw">')
+    assert hit is not None
+    assert hit.matched_text == hit.evidence_snippet == "password input field present on the page"
+
+
+def test_matched_text_for_captcha_structural_hit_equals_its_description():
+    hit = _detect(captcha_structural_hits=["visible iframe: recaptcha/api2/anchor"])
+    assert hit is not None
+    assert hit.matched_text == "visible iframe: recaptcha/api2/anchor"
+
+
+# --- evidence_snippet readability (raw-HTML-slice regression) ---------------
+
+
+def test_dom_structural_hit_snippet_is_plain_not_html_slice():
+    hit = _detect(dom='<input type="password" name="pw">')
+    assert hit is not None
+    assert "<" not in hit.evidence_snippet
+    assert hit.evidence_snippet == "password input field present on the page"
+
+
+def test_evidence_snippet_capped_at_200_chars():
+    filler = "lorem ipsum dolor sit amet " * 6
+    long_text = f"{filler}we are unable to provide a quote for this profile {filler}"
+    hit = _detect(text=long_text)
+    assert hit is not None
+    assert hit.kind == "hard_ineligibility"
+    assert len(hit.evidence_snippet) <= 200
 
 
 def test_gates_module_has_no_browser_use_import():

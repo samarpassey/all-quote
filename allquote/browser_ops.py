@@ -16,20 +16,51 @@ API calls — see tests/test_browser_ops.py):
    filtering does not touch it).
 2. Gate detection is deterministic, not LLM-decided. `make_step_hook` runs
    `allquote.gates.detect()` on every step using stable Playwright/CDP APIs
-   (`page.evaluate("() => document.body.innerText")`, `page.evaluate("() =>
+   (`scan_active_region`'s `page.evaluate`, `page.evaluate("() =>
    document.documentElement.outerHTML")` — this Page class requires arrow-
    function-format JS, confirmed by running it) — never browser-use's internal
    DOM serializer/`llm_representation()`, which is an interactive-elements
    listing for the model's own action loop, not a page-text transcript, and
    is undocumented, version-specific surface this module has no business
    coupling to. On a hit it calls `agent.stop()` directly; the LLM never
-   decides to proceed past a gate.
+   decides to proceed past a gate. Detection is also skipped entirely for a
+   step whose `document.readyState !== "complete"` — a mid-load DOM (a modal
+   not yet attached, a script tag not yet run, a partially-parsed body) is a
+   false-positive factory for every detector, not just CAPTCHA, and the next
+   step re-checks once the page has actually settled. Text detectors never
+   see `document.body.innerText` — `scan_active_region` scopes them to the
+   nearest container of the visible, in-viewport interactive controls
+   (excluding footer/nav/promo regions) and also reports whether an unchecked
+   checkbox or required input sits in that same container, which
+   consent_or_terms_required/declaration_attestation additionally require
+   before firing (see allquote/gates.py's docstring — this is what stops
+   footer promo fine print, e.g. an unrelated credit-card offer's "consent to
+   a credit check", from ever being read as an in-flow consent gate). CAPTCHA
+   detection additionally runs `_CAPTCHA_SCAN_JS`, a third `page.evaluate`
+   call that requires BOTH a visible iframe (recaptcha/hcaptcha/turnstile
+   challenge src) AND a rendered size consistent with an actual widget — this
+   is what separates a real v2 checkbox (~304x78) from reCAPTCHA v3's
+   mandatory `.grecaptcha-badge` attribution badge (~70x60,
+   `data-size="invisible"`), which is present on the majority of commercial
+   sites and is not a challenge. `_BOX_SCAN_JS` below uses the same
+   non-zero-`getBoundingClientRect` visibility primitive for redaction boxes.
+   This is what lets `gates.detect()` tell a presented challenge apart from a
+   merely-loaded reCAPTCHA library (see allquote/gates.py's docstring);
+   gates.py itself never regexes dom_snapshot for CAPTCHA markup, nor does it
+   ever see unscoped page text.
 3. The raw screenshot never touches disk. `capture_evidence_screenshot`
    captures to bytes in memory, computes redaction boxes from BOTH input
    values and rendered text (a quote-summary page can echo a sensitive value
    as plain text, which no input-value scan or CSS trick would catch), and
    hands bytes straight to `redact.redact_image` — there is no code path
-   that writes the unredacted bytes anywhere.
+   that writes the unredacted bytes anywhere. The screenshot is a viewport
+   capture, so a text-based gate hit can be correctly scoped (point 2) and
+   still be below the fold — `scroll_text_into_view` (called by
+   allquote/executor.py before capture) is a best-effort attempt to find a
+   GateHit's `matched_text` as live page text and scroll it on screen first;
+   it returns False rather than raising when it can't (e.g. a structural
+   hit's plain-language label was never real page prose), so the caller can
+   say the artifact may not show it instead of implying that it does.
 """
 
 import json
@@ -194,6 +225,241 @@ def build_tools(
     return tools
 
 
+# --- CAPTCHA structural visibility scan --------------------------------------
+#
+# A presented CAPTCHA challenge vs. a merely-loaded CAPTCHA library looks
+# identical to a substring search over raw HTML (both contain the string
+# "recaptcha") but is trivially different to a live DOM: a challenge is an
+# actually-rendered element. This mirrors _BOX_SCAN_JS's own visibility test
+# (non-zero getBoundingClientRect) rather than inventing a second convention.
+#
+# A visible iframe alone is NOT enough: reCAPTCHA v3's mandatory
+# ".grecaptcha-badge" attribution widget ("Protected by reCAPTCHA") is a
+# real, visible, non-zero-sized iframe whose src also contains
+# "recaptcha/api2/anchor" — it is score-based and invisible to the visitor,
+# present on most commercial sites, and never presents a challenge. It is
+# excluded three ways: by ancestor ".grecaptcha-badge" class, by a
+# "data-size=\"invisible\"" attribute anywhere in its ancestor chain, and by
+# a minimum rendered size (~304x78 for a real v2 checkbox vs. ~70x60 for the
+# v3 badge) — any one of the three is enough to catch it, so a site that
+# only satisfies one is still excluded.
+_MIN_CAPTCHA_WIDTH = 250
+_MIN_CAPTCHA_HEIGHT = 60
+
+_CAPTCHA_SCAN_JS = rf"""
+() => {{
+    const hits = [];
+    const visible = (el) => {{
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+    }};
+    const isBadgeOrInvisible = (el) => {{
+        let node = el;
+        while (node) {{
+            if (node.classList && node.classList.contains("grecaptcha-badge")) return true;
+            if (node.getAttribute && node.getAttribute("data-size") === "invisible") return true;
+            node = node.parentElement;
+        }}
+        return false;
+    }};
+
+    for (const frame of document.querySelectorAll("iframe[src]")) {{
+        if (!visible(frame)) continue;
+        if (isBadgeOrInvisible(frame)) continue;
+        const rect = frame.getBoundingClientRect();
+        if (rect.width < {_MIN_CAPTCHA_WIDTH} || rect.height < {_MIN_CAPTCHA_HEIGHT}) continue;
+        const src = frame.src || "";
+        if (/recaptcha\/api2\/(anchor|bframe)/i.test(src)) {{
+            hits.push("visible iframe: recaptcha/api2/" + (/bframe/i.test(src) ? "bframe" : "anchor"));
+        }} else if (/hcaptcha\.com\/captcha/i.test(src)) {{
+            hits.push("visible iframe: hcaptcha.com/captcha");
+        }} else if (/turnstile/i.test(src)) {{
+            hits.push("visible iframe: turnstile challenge");
+        }}
+    }}
+
+    const cfChallenge = document.querySelector("#cf-challenge-stage, #challenge-stage, .cf-turnstile-wrapper");
+    if (cfChallenge && visible(cfChallenge)) {{
+        hits.push("visible Cloudflare interstitial");
+    }}
+
+    return hits;
+}}
+"""
+
+
+async def scan_captcha_structural_hits(page: Any) -> list[str]:
+    """Returns plain-text descriptions of any visible CAPTCHA-shaped element
+    on the current page — empty if none. Never raises: a dead/navigating
+    page's evaluate() failing here must not block gate detection for the
+    step, same rationale as the text/dom extraction in `make_step_hook`.
+    """
+    try:
+        raw_result = await page.evaluate(_CAPTCHA_SCAN_JS)
+        result = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
+    except Exception:
+        return []
+    return list(result) if result else []
+
+
+# --- active-region scoping: text detectors never see the whole page --------
+#
+# document.body.innerText includes everything on the page — footer legal
+# boilerplate, cross-sell promo blocks, unrelated fine print — exactly as
+# readily as the actual in-flow form copy a gate is supposed to be about.
+# That produced a real false positive: Tangerine Bank credit-card promo
+# fine print in sonnet.ca's footer ("...must consent to a credit check...")
+# matched consent_or_terms_required, nowhere near the form being filled in.
+# `_ACTIVE_REGION_JS` finds the nearest common container of the visible,
+# in-viewport interactive controls (input/select/textarea/button/[role=
+# button]) — in practice a <form>, or the smallest ancestor spanning them —
+# explicitly excluding <footer>/<nav>/[role=contentinfo] and common promo/
+# disclaimer classes from the candidate set before computing that container.
+# gates.detect()'s text patterns run against ITS innerText, never the whole
+# page's.
+_ACTIVE_REGION_JS = r"""
+() => {
+    const EXCLUDE_SELECTOR = 'footer, nav, [role="contentinfo"], .promo, .promotion, ' +
+        '.disclaimer, .fine-print, .advertisement, .marketing, [class*="promo"], ' +
+        '[class*="disclaimer"], [class*="advert"]';
+
+    const viewportW = window.innerWidth || document.documentElement.clientWidth;
+    const viewportH = window.innerHeight || document.documentElement.clientHeight;
+    const inViewport = (rect) => (
+        rect.width > 0 && rect.height > 0 &&
+        rect.bottom > 0 && rect.top < viewportH &&
+        rect.right > 0 && rect.left < viewportW
+    );
+
+    const isExcluded = (el) => {
+        let node = el;
+        while (node) {
+            if (node.matches && node.matches(EXCLUDE_SELECTOR)) return true;
+            node = node.parentElement;
+        }
+        return false;
+    };
+
+    const candidates = Array.from(
+        document.querySelectorAll('input, select, textarea, button, [role="button"]')
+    ).filter((el) => !isExcluded(el) && inViewport(el.getBoundingClientRect()));
+
+    if (candidates.length === 0) {
+        // Nothing to scope to (e.g. a pure informational/error page) --
+        // the whole body is the only reasonable region.
+        return { text: document.body.innerText || "", hasBlockingControl: false };
+    }
+
+    // Prefer an explicit <form> that contains the majority of candidates.
+    let container = null;
+    for (const form of document.querySelectorAll("form")) {
+        if (isExcluded(form)) continue;
+        const containedCount = candidates.filter((el) => form.contains(el)).length;
+        if (containedCount > candidates.length / 2) {
+            container = form;
+            break;
+        }
+    }
+
+    if (!container) {
+        // Lowest common ancestor of every candidate.
+        let common = candidates[0];
+        for (const el of candidates.slice(1)) {
+            while (common && !common.contains(el)) {
+                common = common.parentElement;
+            }
+        }
+        container = common;
+    }
+
+    if (!container || isExcluded(container)) {
+        container = document.querySelector("main") || document.body;
+    }
+
+    const hasUncheckedCheckbox = Array.from(
+        container.querySelectorAll('input[type="checkbox"]')
+    ).some((cb) => !cb.checked);
+    const hasRequiredInput = container.querySelectorAll("input[required], select[required], textarea[required]").length > 0;
+
+    return {
+        text: container.innerText || "",
+        hasBlockingControl: hasUncheckedCheckbox || hasRequiredInput,
+    };
+}
+"""
+
+
+async def scan_active_region(page: Any) -> tuple[str, bool]:
+    """Returns (active_region_text, has_blocking_control) — see
+    `_ACTIVE_REGION_JS`. Falls back to (document.body.innerText, False) on
+    any evaluate failure, same fail-open-to-full-page-text behaviour the
+    caller already had before this scoping existed, rather than blocking
+    detection outright on a transient evaluate error.
+    """
+    try:
+        raw_result = await page.evaluate(_ACTIVE_REGION_JS)
+        result = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
+    except Exception:
+        try:
+            fallback_text = await page.evaluate("() => document.body.innerText")
+        except Exception:
+            return "", False
+        return fallback_text, False
+    if not result:
+        return "", False
+    return result.get("text", "") or "", bool(result.get("hasBlockingControl"))
+
+
+# --- scroll a gate's matched text into view before evidence capture --------
+#
+# The evidence screenshot is a viewport capture; a text-based gate hit can
+# be scoped correctly (see above) and still not be currently on screen (a
+# tall form where the matched checkbox is below the fold). Best-effort: find
+# `matched_text` as live page text and scroll its element into view. Returns
+# False (never raises) if it can't be found — e.g. a structural hit's plain-
+# language label, which was never real page prose to begin with — so the
+# caller can say so in the evidence reason rather than imply the screenshot
+# shows it.
+_SCROLL_TO_TEXT_JS = r"""
+(needle) => {
+    // Returns an object, not a bare boolean: this Page.evaluate() wrapper
+    // stringifies a raw JS boolean via Python's str(bool) ("True"/"False"),
+    // not JSON — bool("False") is truthy, so a bare true/false return would
+    // make every call look like a hit. Every other page.evaluate() in this
+    // module already returns an object/array for the same reason.
+    const normalize = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const target = normalize(needle);
+    if (!target) return { found: false };
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+        const content = normalize(node.textContent);
+        if (content && content.includes(target)) {
+            const el = node.parentElement;
+            if (el) {
+                el.scrollIntoView({ block: "center", inline: "nearest" });
+                return { found: true };
+            }
+        }
+    }
+    return { found: false };
+}
+"""
+
+
+async def scroll_text_into_view(browser_session: BrowserSession, needle: str) -> bool:
+    clean = needle.strip().rstrip("…").strip()
+    if not clean:
+        return False
+    try:
+        page = await browser_session.must_get_current_page()
+        raw_result = await page.evaluate(_SCROLL_TO_TEXT_JS, clean)
+        result = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
+    except Exception:
+        return False
+    return bool(result.get("found")) if result else False
+
+
 # --- deterministic gate step hook -------------------------------------------
 
 
@@ -229,16 +495,33 @@ def make_step_hook(
 
         try:
             page = await browser_session.must_get_current_page()
-            text = await page.evaluate("() => document.body.innerText")
+            ready_state = await page.evaluate("() => document.readyState")
         except Exception:
             return
+
+        if ready_state != "complete":
+            # A mid-load DOM is a false-positive factory for every detector,
+            # not just CAPTCHA — a modal not yet attached, a script not yet
+            # run, a partially-parsed body. Skip this step; the callback
+            # fires again on the next step once the page has settled.
+            return
+
+        active_text, blocking_control_present = await scan_active_region(page)
 
         try:
             dom = await page.evaluate("() => document.documentElement.outerHTML")
         except Exception:
             return
 
-        hit = gates.detect(url, text, dom)
+        captcha_structural_hits = await scan_captcha_structural_hits(page)
+
+        hit = gates.detect(
+            url,
+            active_text,
+            dom,
+            captcha_structural_hits=captcha_structural_hits,
+            blocking_control_present=blocking_control_present,
+        )
         if hit is None:
             return
 
@@ -246,7 +529,8 @@ def make_step_hook(
             update={
                 "evidence_snippet": redact_text(
                     hit.evidence_snippet, profile, vault_path=vault_path, vault_key=vault_key
-                )
+                ),
+                "matched_text": redact_text(hit.matched_text, profile, vault_path=vault_path, vault_key=vault_key),
             }
         )
         gate_box.append(redacted_hit)

@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head><title>Get a quote - step 1 of 3</title></head>
+<body>
+  <h1>Vehicle details</h1>
+  <form action="happy_path_step2.html" method="get">
+    <label for="province">Province</label>
+    <select id="province" name="province">
+      <option value="ON">Ontario</option>
+      <option value="AB">Alberta</option>
+    </select>
+    <label for="make">Vehicle make</label>
+    <input id="make" name="make" type="text">
+    <button type="submit" id="next">Continue</button>
+  </form>
+
+  <!-- Unrelated cross-sell fine print far below the actual form, the exact
+       shape of the sonnet.ca false positive: a credit-card promo mentioning
+       "consent to a credit check" that has nothing to do with the insurance
+       quote form above it. -->
+  <footer>
+    <p class="fine-print">
+      Special offer: Applicants must apply for the Tangerine Credit Card and
+      must consent to a credit check to be eligible for this promotion.
+      Terms and conditions apply. See details for eligibility requirements.
+    </p>
+    <p>&copy; 2026 Example Insurance Co.</p>
+  </footer>
+</body>
+</html>

@@ -463,18 +463,32 @@ async def _run_single_attempt(
     vault_path: Path,
     vault_key: str | None,
     agent_runner: Any,
+    headless: bool = True,
 ) -> QuoteResult:
     """Runs one browser attempt end to end and returns a terminal
     QuoteResult, or raises `_RetryAttempt` if (and only if) this was attempt
     1 and the failure was transient. The browser session for this attempt is
     ALWAYS stopped before this function returns or raises, via `finally` —
     no code path leaks a browser process.
+
+    `keep_alive=True` here is load-bearing, not cosmetic: browser-use's own
+    `Agent.run()` tears the browser down itself in its `finally` clause (via
+    `Agent.close()` -> `browser_session.kill()`) unless the profile it was
+    given has `keep_alive=True` — and it does this INSIDE `agent_runner()`,
+    before control ever returns here. Without it, a gate hit (which calls
+    `agent.stop()` from the step hook, which ends `agent.run()`'s loop) kills
+    the session before the `write_evidence(detail)` call below ever runs,
+    so `capture_evidence_screenshot` always fails with a dead CDP client —
+    exactly the failure mode seen in a real run's capture_failure.json
+    ("Root CDP client not initialized"). This function's own `finally:
+    await browser_session.stop()` remains the single place responsible for
+    teardown, and it only runs after evidence capture has already happened.
     """
     sensitive_data: dict[str, str] = {}
     gate_box: list[gates.GateHit] = []
     agent_box: list[Any] = []
     tools = browser_ops.build_tools(profile, sensitive_data, vault_path=vault_path, vault_key=vault_key)
-    browser_session = BrowserSession(browser_profile=BrowserProfile(headless=True))
+    browser_session = BrowserSession(browser_profile=BrowserProfile(headless=headless, keep_alive=True))
     started = time.monotonic()
     outcome: AttemptOutcome | None = None
     attempt_exception: BaseException | None = None
@@ -532,11 +546,23 @@ async def _run_single_attempt(
         if gate_box:
             hit = gate_box[0]
             status = _GATE_STATUS[hit.kind]
+            # Best-effort: bring the matched text on screen before capture so
+            # the evidence screenshot actually shows what the reason claims —
+            # the screenshot is a viewport capture, and a correctly-scoped
+            # active-region hit can still be below the fold. Never claim
+            # corroboration we don't have.
+            scrolled = await browser_ops.scroll_text_into_view(browser_session, hit.matched_text)
             reason = f"{hit.kind}: {hit.evidence_snippet}"
+            if not scrolled:
+                reason += (
+                    " (evidence screenshot may not show this text — it could not be "
+                    "located and scrolled into view before capture)"
+                )
             if outcome is not None and outcome.ended_via == "halt" and outcome.final_result:
                 reason += f" (model also called halt: {outcome.final_result})"
             detail["gate_kind"] = hit.kind
             detail["evidence_snippet"] = hit.evidence_snippet
+            detail["scrolled_to_evidence"] = scrolled
             evidence = await write_evidence(detail)
             return _build_quote_result(
                 record,
@@ -671,6 +697,7 @@ async def run_route(
     fixture_url: str | None = None,
     max_steps: int | None = None,
     timeout_s: float | None = None,
+    headless: bool = True,
     vault_path: Path = vault.VAULT_PATH,
     vault_key: str | None = None,
     db_path: Path = registry.DB_PATH,
@@ -731,6 +758,7 @@ async def run_route(
                 vault_path=vault_path,
                 vault_key=vault_key,
                 agent_runner=agent_runner,
+                headless=headless,
             )
         except _RetryAttempt as retry:
             last_exception = retry.exc
@@ -797,6 +825,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             fixture_url=args.fixture_url,
             max_steps=args.max_steps,
             timeout_s=args.timeout_seconds,
+            headless=not args.headed,
         )
     )
     print(result.model_dump_json(indent=2))
@@ -814,6 +843,11 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--fixture-url", default=None, help="local fixture URL (non-live mode)")
     run_parser.add_argument("--max-steps", type=int, default=_default_max_steps())
     run_parser.add_argument("--timeout-seconds", type=float, default=_default_timeout_s())
+    run_parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="show the browser window instead of running headless (default: headless, for demo runs)",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "run":

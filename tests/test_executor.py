@@ -9,6 +9,7 @@ import json
 import sqlite3
 from types import SimpleNamespace
 
+import psutil
 import pytest
 
 from allquote import executor, gates, registry
@@ -36,7 +37,26 @@ class _FakeAgent:
         self.stop_calls += 1
 
 
-async def _tick_hook(hook, url: str) -> None:
+async def _wait_until_ready(browser_session, *, timeout: float = 5.0) -> None:
+    # The step hook now skips detection until document.readyState ==
+    # "complete" (a mid-load DOM is a false-positive factory). In a real
+    # agent run there's always some LLM-call latency between goto() and the
+    # first step callback, so the page has settled by then; these tests
+    # invoke the hook immediately, so they poll for the same condition
+    # explicitly rather than relying on incidental timing.
+    page = await browser_session.must_get_current_page()
+    deadline = asyncio.get_event_loop().time() + timeout
+    while True:
+        state = await page.evaluate("() => document.readyState")
+        if state == "complete":
+            return
+        if asyncio.get_event_loop().time() > deadline:
+            raise AssertionError(f"page did not reach readyState=complete within {timeout}s (last: {state!r})")
+        await asyncio.sleep(0.05)
+
+
+async def _tick_hook(hook, url: str, browser_session) -> None:
+    await _wait_until_ready(browser_session)
     await hook(SimpleNamespace(url=url), None, 1)
 
 
@@ -49,7 +69,7 @@ def _gate_page_driver_factory():
 
     async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
         agent_box.append(_FakeAgent())
-        await _tick_hook(hook, target_url)
+        await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="budget", final_result=None, steps_used=1)
 
     return driver
@@ -73,7 +93,7 @@ def _benchmark_extraction(**overrides) -> dict:
 def _done_driver_factory(extraction: dict):
     async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
         agent_box.append(_FakeAgent())
-        await _tick_hook(hook, target_url)
+        await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="done", final_result=json.dumps(extraction), steps_used=1)
 
     return driver
@@ -113,6 +133,7 @@ def vaulted_profile(tmp_path):
         ("captcha.html", Status.BLOCKED),
         ("maintenance.html", Status.UNREACHABLE),
         ("ineligible.html", Status.INELIGIBLE),
+        ("real_consent_gate.html", Status.MANUAL_HANDOFF),
     ],
 )
 def test_gate_fixture_status_mapping(fixture_name, expected_status, tmp_path, fixture_server, market_record, vaulted_profile):
@@ -137,6 +158,97 @@ def test_gate_fixture_status_mapping(fixture_name, expected_status, tmp_path, fi
     result = _run(body())
     assert result.outcome.status == expected_status
     assert result.evidence.evidence_artifact
+
+
+def test_footer_promo_consent_is_not_a_gate(tmp_path, fixture_server, market_record, vaulted_profile):
+    # The exact sonnet.ca shape end to end: Tangerine promo fine print in a
+    # footer must never surface as consent_or_terms_required. With nothing
+    # else on the page to gate on, the run falls through to budget
+    # exhaustion — the same benign-page outcome as happy_path_step1.html.
+    record, db_path = market_record
+    profile, _, vault_path = vaulted_profile
+
+    async def body():
+        return await executor.run_route(
+            record.registry_id,
+            profile,
+            live=False,
+            fixture_url=fixture_server.url_for("footer_promo_consent.html"),
+            max_steps=3,
+            timeout_s=10,
+            vault_path=vault_path,
+            vault_key="test-key",
+            db_path=db_path,
+            evidence_root=tmp_path / "evidence",
+            agent_runner=_gate_page_driver_factory(),
+        )
+
+    result = _run(body())
+    assert result.outcome.status not in (Status.BLOCKED, Status.MANUAL_HANDOFF)
+    assert result.outcome.failure_reason is None or "consent_or_terms_required" not in result.outcome.failure_reason
+
+
+# --- gate evidence: reason states whether the screenshot corroborates it ---
+
+
+def test_gate_reason_has_no_caveat_when_matched_text_is_scrolled_into_view(
+    tmp_path, fixture_server, market_record, vaulted_profile
+):
+    # real_consent_gate.html's matched text ("I consent to a credit check")
+    # is real, findable page prose -- scroll_text_into_view should locate it,
+    # so the reason must NOT carry the "may not show this text" caveat.
+    record, db_path = market_record
+    profile, _, vault_path = vaulted_profile
+
+    async def body():
+        return await executor.run_route(
+            record.registry_id,
+            profile,
+            live=False,
+            fixture_url=fixture_server.url_for("real_consent_gate.html"),
+            max_steps=3,
+            timeout_s=10,
+            vault_path=vault_path,
+            vault_key="test-key",
+            db_path=db_path,
+            evidence_root=tmp_path / "evidence",
+            agent_runner=_gate_page_driver_factory(),
+        )
+
+    result = _run(body())
+    assert result.outcome.status == Status.MANUAL_HANDOFF
+    assert "may not show this text" not in result.outcome.failure_reason
+
+
+def test_gate_reason_has_caveat_when_matched_text_cannot_be_located(
+    tmp_path, fixture_server, market_record, vaulted_profile
+):
+    # captcha.html's structural hit evidence_snippet is a synthetic
+    # plain-language label ("visible element: .g-recaptcha" / a similar
+    # iframe description), never literal page prose -- it can't be found
+    # and scrolled to, so the reason must say so rather than imply the
+    # screenshot shows it.
+    record, db_path = market_record
+    profile, _, vault_path = vaulted_profile
+
+    async def body():
+        return await executor.run_route(
+            record.registry_id,
+            profile,
+            live=False,
+            fixture_url=fixture_server.url_for("captcha.html"),
+            max_steps=3,
+            timeout_s=10,
+            vault_path=vault_path,
+            vault_key="test-key",
+            db_path=db_path,
+            evidence_root=tmp_path / "evidence",
+            agent_runner=_gate_page_driver_factory(),
+        )
+
+    result = _run(body())
+    assert result.outcome.status == Status.BLOCKED
+    assert "may not show this text" in result.outcome.failure_reason
 
 
 # --- success path -------------------------------------------------------------
@@ -228,7 +340,7 @@ def test_halt_without_independent_gate_maps_to_unreachable(tmp_path, fixture_ser
     async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
         agent_box.append(_FakeAgent())
         # Benign page -- the real hook finds nothing.
-        await _tick_hook(hook, target_url)
+        await _tick_hook(hook, target_url, browser_session)
         payload = json.dumps({"gate_kind": "captcha_or_bot_check", "reason": "looks suspicious to me"})
         return AttemptOutcome(ended_via="halt", final_result=payload, steps_used=1)
 
@@ -260,7 +372,7 @@ def test_halt_with_independent_gate_detector_wins(tmp_path, fixture_server, mark
     async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
         agent_box.append(_FakeAgent())
         # captcha.html -- the real hook DOES find something here.
-        await _tick_hook(hook, target_url)
+        await _tick_hook(hook, target_url, browser_session)
         # Model also calls halt, naming a DIFFERENT gate_kind than what the
         # detector actually found -- the detector must win regardless.
         payload = json.dumps({"gate_kind": "login_or_account_required", "reason": "looked like a login wall"})
@@ -295,7 +407,7 @@ def test_budget_exhaustion_maps_to_unreachable_not_success(tmp_path, fixture_ser
 
     async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
         agent_box.append(_FakeAgent())
-        await _tick_hook(hook, target_url)
+        await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="budget", final_result=None, steps_used=max_steps)
 
     async def body():
@@ -318,6 +430,135 @@ def test_budget_exhaustion_maps_to_unreachable_not_success(tmp_path, fixture_ser
     assert result.outcome.status not in (Status.QUOTED_COMPARABLE, Status.QUOTED_NON_COMPARABLE, Status.ESTIMATE_ONLY)
 
 
+# --- browser process teardown on every exit path (keep_alive=True) ------------
+#
+# `keep_alive=True` on the BrowserProfile (see _run_single_attempt's own
+# docstring) hands teardown responsibility entirely to _run_single_attempt's
+# `finally: await browser_session.stop()` — nothing else may kill the
+# process. These three tests exercise the three distinct ways an attempt can
+# end (a transient exception eligible for retry, a non-transient exception,
+# and a deterministic gate hit that never raises at all) and prove, via the
+# real OS pid of the locally-launched Chromium subprocess, that every one of
+# them still ends with the process actually gone — not just that run_route
+# returns the right Status.
+
+
+def _real_pid(browser_session) -> int:
+    pid = browser_session._local_browser_watchdog.browser_pid
+    assert pid is not None, "expected a real local browser subprocess to have been launched"
+    return pid
+
+
+def test_browser_process_stopped_after_transient_timeout_and_retry(
+    tmp_path, fixture_server, market_record, vaulted_profile
+):
+    # TimeoutError is transient (executor.is_transient) and attempt_number
+    # == 1, so run_route retries: two separate BrowserSessions are launched
+    # and each one's own attempt must tear its own process down, including
+    # the one that's about to be discarded for a retry.
+    record, db_path = market_record
+    profile, _, vault_path = vaulted_profile
+    pids: list[int] = []
+
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+        agent_box.append(_FakeAgent())
+        pids.append(_real_pid(browser_session))
+        raise TimeoutError("simulated asyncio.wait_for(agent.run(...)) timeout")
+
+    async def body():
+        return await executor.run_route(
+            record.registry_id,
+            profile,
+            live=False,
+            fixture_url=fixture_server.url_for("happy_path_step1.html"),
+            max_steps=3,
+            timeout_s=10,
+            vault_path=vault_path,
+            vault_key="test-key",
+            db_path=db_path,
+            evidence_root=tmp_path / "evidence",
+            agent_runner=driver,
+        )
+
+    result = _run(body())
+    assert result.outcome.status == Status.UNREACHABLE
+    assert len(pids) == 2, "expected both attempt 1 and its retry to launch a real browser process"
+    assert pids[0] != pids[1]
+    for pid in pids:
+        assert not psutil.pid_exists(pid), f"browser process {pid} survived _run_single_attempt teardown"
+
+
+def test_browser_process_stopped_after_non_transient_exception(tmp_path, fixture_server, market_record, vaulted_profile):
+    # A non-transient exception (e.g. Agent construction failing outright)
+    # never retries -- exactly one attempt, exactly one process, and it must
+    # still be torn down even though the attempt ended via an exception
+    # raised before any Agent/agent_box bookkeeping happened.
+    record, db_path = market_record
+    profile, _, vault_path = vaulted_profile
+    pids: list[int] = []
+
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+        pids.append(_real_pid(browser_session))
+        raise RuntimeError("simulated Agent construction failure")
+
+    async def body():
+        return await executor.run_route(
+            record.registry_id,
+            profile,
+            live=False,
+            fixture_url=fixture_server.url_for("happy_path_step1.html"),
+            max_steps=3,
+            timeout_s=10,
+            vault_path=vault_path,
+            vault_key="test-key",
+            db_path=db_path,
+            evidence_root=tmp_path / "evidence",
+            agent_runner=driver,
+        )
+
+    result = _run(body())
+    assert result.outcome.status == Status.UNREACHABLE
+    assert len(pids) == 1
+    assert not psutil.pid_exists(pids[0]), f"browser process {pids[0]} survived _run_single_attempt teardown"
+
+
+def test_browser_process_stopped_after_gate_halt(tmp_path, fixture_server, market_record, vaulted_profile):
+    # The gate-hit path never raises at all (agent_box[0].stop() just sets a
+    # flag; agent_runner returns a normal AttemptOutcome) -- this is the
+    # exact shape of the original bug: no exception to catch, just a
+    # `return` inside the try block reaching `finally`. captcha.html here
+    # exercises the real deterministic detector, not a stubbed gate_box.
+    record, db_path = market_record
+    profile, _, vault_path = vaulted_profile
+    pids: list[int] = []
+
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+        agent_box.append(_FakeAgent())
+        pids.append(_real_pid(browser_session))
+        await _tick_hook(hook, target_url, browser_session)
+        return AttemptOutcome(ended_via="budget", final_result=None, steps_used=1)
+
+    async def body():
+        return await executor.run_route(
+            record.registry_id,
+            profile,
+            live=False,
+            fixture_url=fixture_server.url_for("captcha.html"),
+            max_steps=3,
+            timeout_s=10,
+            vault_path=vault_path,
+            vault_key="test-key",
+            db_path=db_path,
+            evidence_root=tmp_path / "evidence",
+            agent_runner=driver,
+        )
+
+    result = _run(body())
+    assert result.outcome.status == Status.BLOCKED
+    assert len(pids) == 1
+    assert not psutil.pid_exists(pids[0]), f"browser process {pids[0]} survived _run_single_attempt teardown"
+
+
 # --- retry / is_transient integration ------------------------------------------
 
 
@@ -331,7 +572,7 @@ def test_transient_failure_retries_and_second_attempt_succeeds(tmp_path, fixture
         if calls["n"] == 1:
             raise ConnectionError("simulated transient failure on attempt 1")
         agent_box.append(_FakeAgent())
-        await _tick_hook(hook, target_url)
+        await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="done", final_result=json.dumps(_benchmark_extraction()), steps_used=1)
 
     async def body():
@@ -556,7 +797,7 @@ def test_non_live_never_touches_the_real_quote_url(tmp_path, fixture_server, mar
     async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
         navigated_urls.append(target_url)
         agent_box.append(_FakeAgent())
-        await _tick_hook(hook, target_url)
+        await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="done", final_result=json.dumps(_benchmark_extraction()), steps_used=1)
 
     fixture_target = fixture_server.url_for("happy_path_step3.html")
@@ -604,7 +845,7 @@ def test_sentinel_never_survives_in_any_evidence_artifact(tmp_path, fixture_serv
         await tools.registry.execute_action(
             "fill_sensitive", {"field_name": "licence_number", "element_index": index}, browser_session=browser_session
         )
-        await _tick_hook(hook, target_url)
+        await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="done", final_result=json.dumps(_benchmark_extraction()), steps_used=1)
 
     async def body():

@@ -206,6 +206,7 @@ def test_step_hook_calls_stop_exactly_once_and_redacts_snippet(fixture_server, t
         try:
             page = await session.must_get_current_page()
             await page.goto(fixture_server.url_for("captcha.html"))
+            await _wait_until_ready(session)
 
             gate_box: list[gates.GateHit] = []
             agent_box = [_FakeAgent()]
@@ -276,6 +277,436 @@ def test_step_hook_survives_evaluate_failure_without_crashing():
         await hook(_StateStub("http://example.invalid"), None, 1)
         assert gate_box == []
         assert agent_box[0].stop_calls == 0
+
+    _run(body())
+
+
+# --- CAPTCHA structural visibility scan / regression fixtures ---------------
+#
+# These three fixtures reproduce the first live run's false positive against
+# sonnet.ca: a page that only *loaded* the reCAPTCHA v3 library (a <script>
+# tag) was misclassified as captcha_or_bot_check because the old detector
+# regexed raw dom_snapshot for the bare string "recaptcha", which matches a
+# script `src` attribute exactly as readily as a real widget. Driven through
+# a real Playwright page (not a raw-string read) so page_text is genuine
+# rendered innerText and the captcha scan sees genuine bounding rects — the
+# same signals allquote.browser_ops hands to allquote.gates.detect() in
+# production.
+
+
+async def _wait_until_ready(session: BrowserSession, *, timeout: float = 5.0) -> None:
+    # The step hook now skips detection until document.readyState ==
+    # "complete" (see the mid-load-DOM tests below) — a fixture with a real
+    # subresource (an iframe, a script) can still be mid-navigation the
+    # instant after goto() returns, since goto() itself only dispatches the
+    # CDP navigate command and does not wait for the page to settle. These
+    # tests call page.evaluate()/hook() immediately afterward (unlike a real
+    # agent run, which always has LLM-call latency in between), so they poll
+    # for the same condition production would naturally already have.
+    page = await session.must_get_current_page()
+    deadline = asyncio.get_event_loop().time() + timeout
+    while True:
+        state = await page.evaluate("() => document.readyState")
+        if state == "complete":
+            return
+        if asyncio.get_event_loop().time() > deadline:
+            raise AssertionError(f"page did not reach readyState=complete within {timeout}s (last: {state!r})")
+        await asyncio.sleep(0.05)
+
+
+async def _extract_signals(session: BrowserSession):
+    await _wait_until_ready(session)
+    page = await session.must_get_current_page()
+    text = await page.evaluate("() => document.body.innerText")
+    dom = await page.evaluate("() => document.documentElement.outerHTML")
+    captcha_hits = await browser_ops.scan_captcha_structural_hits(page)
+    return text, dom, captcha_hits
+
+
+def test_recaptcha_v3_script_only_does_not_gate(fixture_server):
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("recaptcha_v3_only.html"))
+            text, dom, captcha_hits = await _extract_signals(session)
+            assert captcha_hits == []
+            hit = gates.detect(
+                fixture_server.url_for("recaptcha_v3_only.html"), text, dom, captcha_structural_hits=captcha_hits
+            )
+            assert hit is None
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_hidden_consent_text_does_not_gate(fixture_server):
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("hidden_consent_text.html"))
+            text, dom, captcha_hits = await _extract_signals(session)
+            # Sanity: the hidden prose really is in the raw markup (proving
+            # this is a genuine display:none-exclusion test, not a fixture
+            # that just never contained the trigger phrases at all) but
+            # never in rendered innerText.
+            assert "motor vehicle authorities" in dom.lower()
+            assert "motor vehicle authorities" not in text.lower()
+            hit = gates.detect(
+                fixture_server.url_for("hidden_consent_text.html"), text, dom, captcha_structural_hits=captcha_hits
+            )
+            assert hit is None
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_captcha_challenge_iframe_gates(fixture_server):
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("captcha_challenge.html"))
+            text, dom, captcha_hits = await _extract_signals(session)
+            assert any("recaptcha/api2/anchor" in h for h in captcha_hits)
+            hit = gates.detect(
+                fixture_server.url_for("captcha_challenge.html"), text, dom, captcha_structural_hits=captcha_hits
+            )
+            assert hit is not None
+            assert hit.kind == "captcha_or_bot_check"
+            assert "<" not in hit.evidence_snippet
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_recaptcha_v3_badge_does_not_gate(fixture_server):
+    # The second live-run false positive against sonnet.ca: a genuinely
+    # visible, non-zero-sized iframe whose src DOES contain
+    # "recaptcha/api2/anchor" — but it's the mandatory v3 attribution badge
+    # ("Protected by reCAPTCHA"), not a challenge. Excluded three ways in
+    # _CAPTCHA_SCAN_JS (ancestor .grecaptcha-badge, data-size="invisible",
+    # and its ~70x60 size falling under the ~250x60 real-widget threshold) —
+    # this fixture triggers all three simultaneously.
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("recaptcha_v3_badge.html"))
+            text, dom, captcha_hits = await _extract_signals(session)
+            assert captcha_hits == []
+            hit = gates.detect(
+                fixture_server.url_for("recaptcha_v3_badge.html"), text, dom, captcha_structural_hits=captcha_hits
+            )
+            assert hit is None
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_step_hook_does_not_gate_on_recaptcha_v3_script(fixture_server, tmp_path):
+    # Full production pipeline (make_step_hook), not just gates.detect() —
+    # proves the wiring in browser_ops, not only the detector logic.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("recaptcha_v3_only.html"))
+            await _wait_until_ready(session)
+
+            gate_box: list[gates.GateHit] = []
+            agent_box = [_FakeAgent()]
+            hook = browser_ops.make_step_hook(
+                profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+            )
+            await hook(_StateStub(fixture_server.url_for("recaptcha_v3_only.html")), None, 1)
+
+            assert gate_box == []
+            assert agent_box[0].stop_calls == 0
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_step_hook_gates_on_visible_captcha_challenge_iframe(fixture_server, tmp_path):
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("captcha_challenge.html"))
+            await _wait_until_ready(session)
+
+            gate_box: list[gates.GateHit] = []
+            agent_box = [_FakeAgent()]
+            hook = browser_ops.make_step_hook(
+                profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+            )
+            await hook(_StateStub(fixture_server.url_for("captcha_challenge.html")), None, 1)
+
+            assert agent_box[0].stop_calls == 1
+            assert len(gate_box) == 1
+            assert gate_box[0].kind == "captcha_or_bot_check"
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_step_hook_does_not_gate_on_recaptcha_v3_badge(fixture_server, tmp_path):
+    # Full production pipeline for the exact sonnet.ca false positive.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("recaptcha_v3_badge.html"))
+            await _wait_until_ready(session)
+
+            gate_box: list[gates.GateHit] = []
+            agent_box = [_FakeAgent()]
+            hook = browser_ops.make_step_hook(
+                profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+            )
+            await hook(_StateStub(fixture_server.url_for("recaptcha_v3_badge.html")), None, 1)
+
+            assert gate_box == []
+            assert agent_box[0].stop_calls == 0
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+# --- mid-load DOM: detection must be skipped, not run against a partial page
+
+
+class _LoadingPage:
+    """Stub page whose text/dom, if evaluated, would gate — proving the
+    readyState check is what's suppressing detection, not an absence of a
+    trigger phrase."""
+
+    def __init__(self, ready_state: str):
+        self.ready_state = ready_state
+
+    async def evaluate(self, expression: str, *args: object) -> object:
+        if "readyState" in expression:
+            return self.ready_state
+        if "innerText" in expression:
+            return "are you a robot"
+        if "outerHTML" in expression:
+            return "<html></html>"
+        return []
+
+
+class _LoadingSession:
+    def __init__(self, page: _LoadingPage):
+        self._page = page
+
+    async def must_get_current_page(self) -> _LoadingPage:
+        return self._page
+
+
+def test_step_hook_skips_detection_when_page_still_loading():
+    async def body():
+        from tests.fixtures import build_intake_profile
+
+        profile = build_intake_profile()
+        page = _LoadingPage("loading")
+        session = _LoadingSession(page)
+
+        gate_box: list[gates.GateHit] = []
+        agent_box = [_FakeAgent()]
+        hook = browser_ops.make_step_hook(profile, gate_box, agent_box, session)
+        await hook(_StateStub("http://example.invalid"), None, 1)
+
+        assert gate_box == []
+        assert agent_box[0].stop_calls == 0
+
+    _run(body())
+
+
+def test_step_hook_runs_detection_once_page_reports_complete(tmp_path):
+    # Same trigger content as above, but readyState == "complete" this
+    # time -- proves the suppression is specific to the loading state, not
+    # a change that silently disabled detection altogether.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        page = _LoadingPage("complete")
+        session = _LoadingSession(page)
+
+        gate_box: list[gates.GateHit] = []
+        agent_box = [_FakeAgent()]
+        hook = browser_ops.make_step_hook(
+            profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+        )
+        await hook(_StateStub("http://example.invalid"), None, 1)
+
+        assert len(gate_box) == 1
+        assert gate_box[0].kind == "captcha_or_bot_check"
+        assert agent_box[0].stop_calls == 1
+
+    _run(body())
+
+
+# --- active-region scoping: footer/promo text must never gate --------------
+#
+# The third live-run false positive against sonnet.ca: Tangerine Bank
+# credit-card promo fine print in the page FOOTER ("...must consent to a
+# credit check...") matched consent_or_terms_required even though it has
+# nothing to do with the insurance form. Two independent guards now apply:
+# active-region scoping (the footer isn't part of the form's container at
+# all) and the blocking-control requirement (no checkbox near it either way).
+
+
+def test_footer_promo_consent_does_not_gate(fixture_server):
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("footer_promo_consent.html"))
+            await _wait_until_ready(session)
+
+            active_text, blocking_control_present = await browser_ops.scan_active_region(page)
+            dom = await page.evaluate("() => document.documentElement.outerHTML")
+            # Sanity: the promo text really is on the page (proving this is a
+            # genuine scoping-exclusion test) but never in the scoped text.
+            assert "consent to a credit check" in dom.lower()
+            assert "consent to a credit check" not in active_text.lower()
+            assert "tangerine" not in active_text.lower()
+
+            hit = gates.detect(
+                fixture_server.url_for("footer_promo_consent.html"),
+                active_text,
+                dom,
+                blocking_control_present=blocking_control_present,
+            )
+            assert hit is None
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_real_consent_gate_fires(fixture_server):
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("real_consent_gate.html"))
+            await _wait_until_ready(session)
+
+            active_text, blocking_control_present = await browser_ops.scan_active_region(page)
+            assert blocking_control_present is True
+            dom = await page.evaluate("() => document.documentElement.outerHTML")
+
+            hit = gates.detect(
+                fixture_server.url_for("real_consent_gate.html"),
+                active_text,
+                dom,
+                blocking_control_present=blocking_control_present,
+            )
+            assert hit is not None
+            assert hit.kind == "consent_or_terms_required"
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_step_hook_does_not_gate_on_footer_promo_consent(fixture_server, tmp_path):
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("footer_promo_consent.html"))
+            await _wait_until_ready(session)
+
+            gate_box: list[gates.GateHit] = []
+            agent_box = [_FakeAgent()]
+            hook = browser_ops.make_step_hook(
+                profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+            )
+            await hook(_StateStub(fixture_server.url_for("footer_promo_consent.html")), None, 1)
+
+            assert gate_box == []
+            assert agent_box[0].stop_calls == 0
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_step_hook_gates_on_real_consent_checkbox(fixture_server, tmp_path):
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("real_consent_gate.html"))
+            await _wait_until_ready(session)
+
+            gate_box: list[gates.GateHit] = []
+            agent_box = [_FakeAgent()]
+            hook = browser_ops.make_step_hook(
+                profile, gate_box, agent_box, session, vault_path=vault_path, vault_key="test-key"
+            )
+            await hook(_StateStub(fixture_server.url_for("real_consent_gate.html")), None, 1)
+
+            assert len(gate_box) == 1
+            assert gate_box[0].kind == "consent_or_terms_required"
+            assert agent_box[0].stop_calls == 1
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+# --- scroll_text_into_view: evidence must corroborate what it claims -------
+
+
+def test_scroll_text_into_view_finds_and_scrolls_real_text(fixture_server):
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("real_consent_gate.html"))
+            await _wait_until_ready(session)
+
+            found = await browser_ops.scroll_text_into_view(session, "I consent to a credit check")
+            assert found is True
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_scroll_text_into_view_returns_false_for_text_not_on_page(fixture_server):
+    async def body():
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("happy_path_step1.html"))
+            await _wait_until_ready(session)
+
+            found = await browser_ops.scroll_text_into_view(session, "this exact phrase is not on the page")
+            assert found is False
+        finally:
+            await session.stop()
 
     _run(body())
 

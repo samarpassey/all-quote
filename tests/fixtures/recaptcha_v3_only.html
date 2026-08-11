@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <title>Get a quote - step 1 of 3</title>
+  <!-- Same-origin stand-in for the real gstatic.com URL (this fixture
+       server never makes an off-localhost request) — the path shape
+       ("recaptcha/releases/.../recaptcha__en.js") is what matters: it is
+       the exact string that used to false-positive a raw dom_snapshot
+       regex search for "recaptcha". -->
+  <script src="/recaptcha/releases/w_x/recaptcha__en.js" charset="utf-8"></script>
+</head>
+<body>
+  <h1>Vehicle details</h1>
+  <form action="happy_path_step2.html" method="get">
+    <label for="make">Vehicle make</label>
+    <input id="make" name="make" type="text">
+    <button type="submit" id="next">Next</button>
+  </form>
+  <script>
+    // reCAPTCHA v3 is invisible and score-based: it runs grecaptcha.execute()
+    // in the background on submit and never shows a challenge widget.
+    function onSubmit(token) {
+      document.getElementById("next").click();
+    }
+  </script>
+</body>
+</html>
