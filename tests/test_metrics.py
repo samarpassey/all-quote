@@ -32,11 +32,32 @@ SIX_RESULTS = [
 
 
 def test_evidence_rate_all_valid_evidence():
-    assert evidence_rate(SIX_RESULTS) == 1.0
+    # every result is also "observed" here, so both halves agree
+    rate = evidence_rate(SIX_RESULTS, SIX_RESULTS)
+    assert rate.all_outcomes == 1.0
+    assert rate.observed_only == 1.0
+    assert rate.all_count == 6
+    assert rate.observed_count == 6
 
 
-def test_evidence_rate_empty_list_is_zero():
-    assert evidence_rate([]) == 0.0
+def test_evidence_rate_empty_list_is_none_not_zero():
+    # 0/0 has no meaningful ratio: None, never a misleading 0.0 (same rule
+    # as market_completion's zero-denominator case).
+    rate = evidence_rate([], [])
+    assert rate.all_outcomes is None
+    assert rate.observed_only is None
+    assert rate.all_count == 0
+    assert rate.observed_count == 0
+
+
+def test_evidence_rate_observed_subset_can_diverge_from_all():
+    derived = make_result(Status.SPECIALTY_ONLY)
+    observed = make_result(Status.BLOCKED)
+    rate = evidence_rate([derived, observed], [observed])
+    assert rate.all_outcomes == 1.0
+    assert rate.all_count == 2
+    assert rate.observed_only == 1.0
+    assert rate.observed_count == 1
 
 
 def test_evidence_rate_catches_malformed_row_bypassing_validation():
@@ -54,11 +75,36 @@ def test_evidence_rate_catches_malformed_row_bypassing_validation():
         privacy=good.privacy,
         price=None,
     )
-    assert evidence_rate([good, malformed]) == 0.5
+    rate = evidence_rate([good, malformed], [good, malformed])
+    assert rate.all_outcomes == 0.5
+    assert rate.observed_only == 0.5
 
 
-def test_duplicate_suppression_counts_duplicate_rows():
-    assert duplicate_suppression(SIX_RESULTS) == 1
+def test_duplicate_suppression_runtime_resolved_counts_duplicate_rows():
+    result = duplicate_suppression(SIX_RESULTS, registry=None)
+    assert result.runtime_resolved == 1
+    assert result.registry_seeded is None
+    assert result.registry_seeded_basis is None
+
+
+def test_duplicate_suppression_registry_seeded_collapses_shared_distinct_ids():
+    registry = [
+        build_market_record(registry_id="route-1", distinct_rate_source_id="src-a"),
+        build_market_record(registry_id="seed-1", distinct_rate_source_id="src-a"),
+        build_market_record(registry_id="panel-1", distinct_rate_source_id="src-a"),
+        build_market_record(registry_id="route-2", distinct_rate_source_id="src-b"),
+    ]
+    result = duplicate_suppression([], registry=registry)
+    assert result.registry_seeded == 2  # 4 rows -> 2 distinct sources
+    assert result.registry_seeded_basis == "4 registry rows -> 2 distinct sources"
+    assert result.runtime_resolved == 0
+
+
+def test_duplicate_suppression_empty_registry_is_zero_not_none():
+    # an empty (but supplied) registry has a real, defined answer: no rows,
+    # no duplicates. None is reserved for "no registry snapshot at all".
+    result = duplicate_suppression([], registry=[])
+    assert result.registry_seeded == 0
 
 
 def test_market_completion_comparable_yield_freshness_none_without_registry():

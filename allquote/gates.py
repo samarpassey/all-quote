@@ -48,10 +48,12 @@ controls, excluding <footer>/<nav>/[role=contentinfo]/promo classes) before
 calling `detect()` — this module has no way to enforce that itself, since it
 never sees a live DOM, only whatever string it's handed.
 
-`consent_or_terms_required` and `declaration_attestation` additionally
-require `blocking_control_present=True` — prose alone ("we may run a credit
-check" in a privacy notice) is disclosure, not a gate; the caller confirms
-an actual unchecked checkbox or required input sits in the same active-region
+`consent_or_terms_required`, `declaration_attestation`, and
+`payment_or_binding_step` additionally require `blocking_control_present=True`
+— prose alone ("we may run a credit check" in a privacy notice, or
+eligibility copy naming a "personal credit card") is disclosure or marketing,
+not a gate; the caller confirms an actual unchecked checkbox or required input
+sits in the same active-region
 container before these two kinds may fire at all.
 """
 
@@ -128,6 +130,14 @@ _BOT_WALL_CHECKING_BROWSER = r"checking your browser"
 _BOT_WALL_ATTENTION = r"attention required"
 _BOT_WALL_RAY_ID = r"\bray id\b"
 _BOT_WALL_CLOUDFLARE = r"\bcloudflare\b"
+# Human-verification phrasing axis: verb (confirm/verify/prove, any
+# inflection) + claim (human / not a bot), either order of subject pronoun.
+# The live belairdirect page said "Let's confirm you are human ... this step
+# verifies that you are not a bot" — the old pattern only covered
+# "verify you're/you are human" and missed both the "confirm" verb and the
+# "not a bot" claim entirely. See docs/GUARDRAILS.md Known Limitations.
+_HUMAN_CHECK_VERB = r"(?:confirm|verify|verifies|prove|proves)"
+_HUMAN_CHECK_CLAIM = r"you(?:'re| are) (?:human|not a bot)"
 
 # One entry per gate kind, in priority order (first hit wins). Each pattern
 # is a (surface, pattern, dom_label) triple: "text" runs against page_text
@@ -146,7 +156,7 @@ _GATE_PATTERNS: dict[GateKind, list[tuple[_Source, re.Pattern[str], str | None]]
         # regex, which cannot tell a presented challenge from a loaded
         # library/script reference. Only visible-text phrasing lives here.
         ("text", re.compile(r"are you a robot", re.I), None),
-        ("text", re.compile(r"verify you(?:'re| are) human", re.I), None),
+        ("text", re.compile(rf"{_HUMAN_CHECK_VERB}[^.]{{0,20}}{_HUMAN_CHECK_CLAIM}", re.I), None),
         ("text", re.compile(r"unusual traffic from your (?:network|computer)", re.I), None),
         ("text", re.compile(r"\bcaptcha\b", re.I), None),
         # Full-page bot-wall interstitials (Cloudflare and equivalent) —
@@ -321,7 +331,20 @@ def _snippet(text: str, match: re.Match[str], *, context: int = 90) -> str:
     return snippet
 
 
-_BLOCKING_CONTROL_REQUIRED: frozenset[GateKind] = frozenset({"consent_or_terms_required", "declaration_attestation"})
+# before: frozenset({"consent_or_terms_required", "declaration_attestation"})
+# after: payment_or_binding_step added — the real TD Insurance homepage was
+# misclassified manual_handoff on eligibility/marketing prose ("has a TD
+# personal credit card... personal loan or line of credit") that never had a
+# payment form anywhere on the page. Same discipline as consent/declaration:
+# a caller-confirmed required input (browser_ops.scan_active_region's
+# hasBlockingControl — a real payment form's card/CVV/expiry fields are
+# `required` in practice) must be present in the active region before prose
+# alone is trusted. Fourth prose-vs-control false positive found this way
+# (sonnet.ca footer, Allstate nav chrome, rates.ca domain substring, now
+# this) — see docs/GUARDRAILS.md Known Limitations.
+_BLOCKING_CONTROL_REQUIRED: frozenset[GateKind] = frozenset(
+    {"consent_or_terms_required", "declaration_attestation", "payment_or_binding_step"}
+)
 
 
 def detect(
@@ -360,8 +383,9 @@ def detect(
 
     `blocking_control_present` is whether the caller found an unchecked
     checkbox or a required input inside the same active-region container as
-    `page_text` — required for consent_or_terms_required and
-    declaration_attestation to fire at all, regardless of which prose
+    `page_text` — required for consent_or_terms_required,
+    declaration_attestation, and payment_or_binding_step to fire at all,
+    regardless of which prose
     pattern would otherwise match (see module docstring).
     """
     captcha_structural_hits = captcha_structural_hits or []

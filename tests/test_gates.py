@@ -156,7 +156,8 @@ def test_consent_or_terms_required_fixture_file():
 def test_payment_or_binding_step_paraphrase():
     hit = _detect(
         text="Enter your Visa or Mastercard details below, including the "
-        "3-digit security code on the back, to activate coverage today."
+        "3-digit security code on the back, to activate coverage today.",
+        blocking_control_present=True,
     )
     assert hit is not None
     assert hit.kind == "payment_or_binding_step"
@@ -257,14 +258,15 @@ def test_site_unavailable_http_status_4xx_does_not_fire():
 def test_payment_generalizes_to_field_vocabulary_sentence():
     hit = _detect(
         text="Please provide the card number, expiry date, and the 3-digit "
-        "code on the back to activate your policy."
+        "code on the back to activate your policy.",
+        blocking_control_present=True,
     )
     assert hit is not None
     assert hit.kind == "payment_or_binding_step"
 
 
 def test_payment_structural_card_field():
-    hit = _detect(dom='<input name="cc-number" type="text">')
+    hit = _detect(dom='<input name="cc-number" type="text">', blocking_control_present=True)
     assert hit is not None
     assert hit.kind == "payment_or_binding_step"
 
@@ -468,6 +470,70 @@ def test_ineligibility_outcome_word_boundary_still_matches_whole_word():
     hit = _detect(text="Unfortunately we are unable to provide a rate for this vehicle.")
     assert hit is not None
     assert hit.kind == "hard_ineligibility"
+
+
+# --- Fix A: human-check phrasing miss (belairdirect live probe) -----------
+
+
+def test_belairdirect_human_check_fixture_fires_captcha_or_bot_check():
+    # Literal captured text from data/evidence/13dfdbf3211c/attempt-1/ — the
+    # live run this detector missed. "confirm you are human" and "verifies
+    # that you are not a bot" were both uncovered by the old
+    # "verify you're/you are human"-only pattern.
+    hit = _detect(text=_fixture_text("bot_wall_belairdirect_human_check.html"))
+    assert hit is not None
+    assert hit.kind == "captcha_or_bot_check"
+
+
+def test_human_check_generalizes_to_prove_variant():
+    # Different verb than either the original pattern or the literal
+    # belairdirect capture — proves the fix isn't just grepping that one page.
+    hit = _detect(text="Before you continue, prove you are human by completing the puzzle below.")
+    assert hit is not None
+    assert hit.kind == "captcha_or_bot_check"
+
+
+def test_human_check_still_fires_on_original_verify_wording():
+    # Regression: the pattern this replaces must keep working.
+    hit = _detect(text="Please verify you're human before we show your quote.")
+    assert hit is not None
+    assert hit.kind == "captcha_or_bot_check"
+
+
+# --- Fix B: payment_or_binding_step requires a blocking control -----------
+
+
+def test_td_credit_eligibility_marketing_fixture_does_not_fire():
+    # Literal captured text from data/evidence/2da8222b1aec/attempt-1/ — a
+    # plain TD Insurance homepage with existing-customer discount-eligibility
+    # copy naming "personal credit card" / "line of credit". No payment form
+    # anywhere on the page, so blocking_control_present is (correctly) False.
+    hit = _detect(text=_fixture_text("negative_td_credit_eligibility_marketing.html"))
+    assert hit is None
+
+
+def test_payment_prose_without_blocking_control_does_not_fire():
+    hit = _detect(text="Enter your Visa or Mastercard details below, including the 3-digit security code.")
+    assert hit is None
+
+
+def test_payment_prose_with_blocking_control_fires():
+    hit = _detect(
+        text="Enter your Visa or Mastercard details below, including the 3-digit security code.",
+        blocking_control_present=True,
+    )
+    assert hit is not None
+    assert hit.kind == "payment_or_binding_step"
+
+
+def test_payment_structural_card_field_requires_blocking_control():
+    # The dom-pattern path is subject to the same rule now: a bare card-field
+    # attribute with no caller-confirmed required input does not fire.
+    hit = _detect(dom='<input name="cc-number" type="text">')
+    assert hit is None
+    hit = _detect(dom='<input name="cc-number" type="text">', blocking_control_present=True)
+    assert hit is not None
+    assert hit.kind == "payment_or_binding_step"
 
 
 def test_gates_module_has_no_browser_use_import():

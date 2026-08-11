@@ -123,15 +123,51 @@ Works only for the participant's own insurance shopping.
   to this detector over-matching site chrome rather than a real barrier, not
   to the market itself. Read a `blocked` result's evidence screenshot before
   treating it as a confirmed barrier.
-- Distinct bug, same probe round: rates.ca and lowestrates.ca both returned a
-  Cloudflare "Sorry, you have been blocked — this website is using a
-  security service to protect itself" interstitial, which gates.py's
-  `hard_ineligibility` pattern matched, producing status `ineligible`. That
-  is a misclassification, not a scoping imprecision — `ineligible` asserts
-  "the profile fails a product rule," but the evidence shows an anti-bot
-  wall, which is `blocked` (captcha_or_bot_check) by definition. Any batch
-  outcome recorded as `ineligible` from these two routes (or any route
-  matching similar "blocked"/"access denied"/"security service" phrasing)
-  should be read as `blocked` until gates.py's hard_ineligibility pattern is
-  tightened to exclude bot-wall language. Not fixed now, same time
-  constraint as the two entries above.
+- FIXED: rates.ca and lowestrates.ca both returned a Cloudflare "Sorry, you
+  have been blocked — this website is using a security service to protect
+  itself" interstitial, which gates.py's `hard_ineligibility` pattern
+  matched (root cause: `rate` with no `\b` word boundary matched inside the
+  domain name itself — "unable to access **rate**s.ca"), producing status
+  `ineligible` instead of `blocked`. Fixed: `_INELIG_OUTCOME` is now
+  `\b`-bounded, and `captcha_or_bot_check` gained explicit bot-wall text
+  patterns ("you have been blocked", "security service to protect", "ray
+  id", "cloudflare", etc.), which — being highest priority — pre-empt
+  `hard_ineligibility` regardless. Regression-tested from the literal
+  captured wall text (`tests/fixtures/bot_wall_cloudflare_rates_ca.html`).
+  KNOWN GAP even after this fix: a live re-run of lowestrates.ca hit the
+  identical wall text and still came back `unreachable: budget exhausted`,
+  not `blocked` — the deterministic detector never got invoked against that
+  page's content before the agent's step loop ended (the wall appeared as
+  the result of the last action taken; no further step-hook evaluation
+  followed to catch it). The regex fix is verified correct at the unit
+  level; the live step-hook cadence can still miss a terminal page reached
+  on a run's final step. Not investigated further — out of scope for a
+  regex-only fix.
+- FIXED: a live Task 7 Phase 2 probe against belairdirect hit a real "Let's
+  confirm you are human ... this step verifies that you are not a bot"
+  interstitial that `captcha_or_bot_check` missed entirely (only "verify
+  you're/you are human" was covered — not "confirm", not "not a bot"),
+  producing an unreachable/voluntary-halt result instead of a deterministic
+  `blocked` hit. Fixed: the verb/claim axis now covers
+  confirm/verify/verifies/prove/proves × human/not-a-bot. Regression-tested
+  from the literal captured page text
+  (`tests/fixtures/bot_wall_belairdirect_human_check.html`).
+- FIXED: TD Insurance's plain homepage was misclassified `manual_handoff`
+  via `payment_or_binding_step` matching existing-customer discount-
+  eligibility marketing copy ("has a TD personal credit card... personal
+  loan or line of credit") — no payment form was ever on the page. Fourth
+  prose-vs-control false positive found this way (sonnet.ca footer, Allstate
+  nav chrome, rates.ca domain substring, now this). Fixed:
+  `payment_or_binding_step` now requires `blocking_control_present=True`,
+  the same discipline already applied to `consent_or_terms_required` and
+  `declaration_attestation`. Regression-tested from the literal captured
+  text (`tests/fixtures/negative_td_credit_eligibility_marketing.html`).
+- STILL OPEN (same class as the sonnet.ca/Allstate entries above, not
+  addressed by this pass): Square One's evidence screenshot for a voluntary
+  consent-declaration halt showed a blank/loading page under a step-progress
+  header, not the consent screen the model's (specific, plausible) halt
+  reason described — most likely a timing gap between the halt decision and
+  evidence-screenshot capture, not a wrong call. A batch orchestration bug
+  (not gates.py) separately caused CAA Insurance's real captured evidence to
+  be discarded in favor of a synthetic artifact when its subprocess was
+  killed on a hard-cap timeout before printing final output.
