@@ -1,4 +1,4 @@
-.PHONY: setup test run dashboard intake export export-registry
+.PHONY: setup test run dashboard app intake export export-registry
 
 setup:
 	uv sync
@@ -9,6 +9,9 @@ test:
 
 run:
 	uv run --no-sync python -m allquote.planner run --route $(ROUTE)
+
+app:
+	uv run --no-sync python -m allquote.app
 
 dashboard:
 	uv run --no-sync python -m allquote.dashboard

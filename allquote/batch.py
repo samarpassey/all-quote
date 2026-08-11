@@ -218,7 +218,13 @@ def run_batch(
     vault_key: str | None = None,
     runs_root: Path = results_store.RUNS_ROOT,
     budget_s: float = DEFAULT_BUDGET_S,
+    run_id: str | None = None,
 ) -> str:
+    """`run_id`: pass a pre-generated id (results_store.new_run_id()) when a
+    caller needs to know it before this function returns -- e.g. app.py's run
+    console starts this in a background thread and polls
+    data/runs/<run_id>/manifest.json, which save_manifest() below writes
+    almost immediately, long before any route finishes."""
     from allquote import intake
 
     records = records if records is not None else registry.list_records()
@@ -228,7 +234,7 @@ def run_batch(
     records_by_id = {r.registry_id: r for r in records}
     planned = planner.plan_routes(records)
 
-    run_id = results_store.new_run_id()
+    run_id = run_id or results_store.new_run_id()
     batch_started = datetime.now(timezone.utc)
     batch_deadline = time.monotonic() + budget_s
     results_store.save_manifest(run_id, planned, started_at=batch_started, runs_root=runs_root)
