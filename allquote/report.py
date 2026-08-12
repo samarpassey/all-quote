@@ -29,6 +29,7 @@ class MergedRun:
     run_ids: tuple[str, ...]  # every run folder found, oldest first
     primary_registry_id: dict[str, str]  # distinct_rate_source_id -> primary registry_id
     payloads: dict[str, dict]  # distinct_rate_source_id -> raw result-or-not_attempted json
+    notes: tuple[str, ...]  # run-level notes collected from every merged manifest, in order
 
 
 def merge_runs(*, runs_root: Path = results_store.RUNS_ROOT) -> MergedRun:
@@ -37,18 +38,46 @@ def merge_runs(*, runs_root: Path = results_store.RUNS_ROOT) -> MergedRun:
     distinct_rate_source_id. This is the general form of "a 3-route re-run
     supersedes part of a 79-route batch": it doesn't special-case which run
     is "the base" -- any run found later on disk simply wins for the routes
-    it covers, matching results_store.py's own supersession model."""
+    it covers, matching results_store.py's own supersession model.
+
+    One deliberate exception: a `not_attempted` payload (budget ran out
+    before this route was reached) NEVER overwrites an existing REAL result
+    from an earlier run for the same distinct source. "We didn't get to it
+    this time" must not erase "we already know the answer" -- a later run
+    can only improve on an earlier one, never regress it back to unknown.
+    A not_attempted payload still fills in when nothing earlier exists."""
     run_ids = results_store.list_run_ids(runs_root=runs_root)
     primary_registry_id: dict[str, str] = {}
     payloads: dict[str, dict] = {}
+    notes: list[str] = []
     for run_id in run_ids:
         manifest = results_store.load_manifest(run_id, runs_root=runs_root)
+        notes.extend(manifest.get("notes", []))
         for route in manifest["routes"]:
             primary_registry_id[route["distinct_rate_source_id"]] = route["registry_id"]
         for payload in results_store.list_results(run_id, runs_root=runs_root):
-            payloads[payload["distinct_rate_source_id"]] = payload
+            distinct_id = payload["distinct_rate_source_id"]
+            existing = payloads.get(distinct_id)
+            is_not_attempted = "quote_result" not in payload
+            existing_is_real = existing is not None and "quote_result" in existing
+            if is_not_attempted and existing_is_real:
+                continue
+            payloads[distinct_id] = payload
     return MergedRun(
-        run_ids=tuple(run_ids), primary_registry_id=primary_registry_id, payloads=payloads
+        run_ids=tuple(run_ids),
+        primary_registry_id=primary_registry_id,
+        payloads=payloads,
+        notes=tuple(notes),
+    )
+
+
+def not_attempted_distinct_ids(merged: MergedRun) -> list[str]:
+    """Distinct sources whose final (post-merge) payload is a not_attempted
+    marker -- i.e. no run, ever, produced a real result for them."""
+    return sorted(
+        distinct_id
+        for distinct_id, payload in merged.payloads.items()
+        if "quote_result" not in payload
     )
 
 
@@ -120,6 +149,8 @@ class CoverageReport:
     freshness: float | None
     evidence_rate: metrics.EvidenceRate
     duplicate_suppression: metrics.DuplicateSuppression
+    not_attempted: tuple[str, ...]
+    run_notes: tuple[str, ...]
     notes: tuple[str, ...]
 
 
@@ -164,6 +195,8 @@ def compute_report(
         freshness=metrics.freshness(all_results, registry=snapshot),
         evidence_rate=metrics.evidence_rate(all_results, observed_results),
         duplicate_suppression=metrics.duplicate_suppression(all_results, registry=base_registry),
+        not_attempted=tuple(not_attempted_distinct_ids(merged)),
+        run_notes=merged.notes,
         notes=NOTES,
     )
 
@@ -193,6 +226,15 @@ def print_report(report: CoverageReport) -> None:
         f"runtime_resolved={ds.runtime_resolved}"
     )
     print()
+    print(f"not attempted (no run ever produced a result): {len(report.not_attempted)}")
+    for distinct_id in report.not_attempted:
+        print(f"  - {distinct_id}")
+    print()
+    if report.run_notes:
+        print("run-specific notes:")
+        for note in report.run_notes:
+            print(f"NOTE: {note}")
+        print()
     for note in report.notes:
         print(f"NOTE: {note}")
 

@@ -142,6 +142,137 @@ def test_fill_public_types_value(fixture_server, tmp_path):
     _run(body())
 
 
+def test_fill_public_refuses_identity_shaped_field(fixture_server, tmp_path):
+    # Confirmed live-run bug: the model called fill_public("John", ...) on a
+    # real name field on two live insurer sites, bypassing fill_sensitive
+    # and the vault entirely. This is the code-level backstop.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        tools = browser_ops.build_tools(profile, {}, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("identity_and_public_fields.html"))
+            index = await _index_for(session, id_attr="first_name")
+            with pytest.raises(RuntimeError, match="identity field"):
+                await tools.registry.execute_action(
+                    "fill_public",
+                    {"value": "John", "element_index": index},
+                    browser_session=session,
+                )
+            # refused before typing anything -- the field must still be empty
+            actual = await page.evaluate("() => document.getElementById('first_name').value")
+            assert actual == ""
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_fill_public_refuses_dob_and_street_but_allows_make_and_province(fixture_server, tmp_path):
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        tools = browser_ops.build_tools(profile, {}, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("identity_and_public_fields.html"))
+
+            for id_attr in ("dob", "street_address"):
+                index = await _index_for(session, id_attr=id_attr)
+                with pytest.raises(RuntimeError, match="identity field"):
+                    await tools.registry.execute_action(
+                        "fill_public",
+                        {"value": "fabricated", "element_index": index},
+                        browser_session=session,
+                    )
+
+            # Non-identity fields -- including "province", which naively
+            # contains the substring "vin" -- must still work.
+            for id_attr, value in (("vehicle_make", "Honda"), ("province", "ON")):
+                index = await _index_for(session, id_attr=id_attr)
+                await tools.registry.execute_action(
+                    "fill_public",
+                    {"value": value, "element_index": index},
+                    browser_session=session,
+                )
+                actual = await page.evaluate(f"() => document.getElementById('{id_attr}').value")
+                assert actual == value
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_fill_sensitive_street_number_and_street_name_split_the_real_street_value(fixture_server, tmp_path):
+    # CAA's driver-details step splits street address into two fields
+    # instead of one; fill_sensitive must satisfy both from the SAME real
+    # vaulted street value, never a second vault entry.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, plaintext = build_vaulted_profile(vault_path, "test-key")
+        sensitive_data: dict[str, str] = {}
+        tools = browser_ops.build_tools(profile, sensitive_data, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("street_split_fields.html"))
+
+            number_index = await _index_for(session, id_attr="street_number")
+            await tools.registry.execute_action(
+                "fill_sensitive",
+                {"field_name": "street_number", "element_index": number_index},
+                browser_session=session,
+            )
+            name_index = await _index_for(session, id_attr="street_name")
+            await tools.registry.execute_action(
+                "fill_sensitive",
+                {"field_name": "street_name", "element_index": name_index},
+                browser_session=session,
+            )
+
+            number_value = await page.evaluate("() => document.getElementById('street_number').value")
+            name_value = await page.evaluate("() => document.getElementById('street_name').value")
+            assert plaintext["street"] == f"{number_value} {name_value}"
+            assert sensitive_data["street_number"] == number_value
+            assert sensitive_data["street_name"] == name_value
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_fill_public_refuses_street_name_field_suggesting_street_name_not_legal_name(fixture_server, tmp_path):
+    # Regression test for the detection-order bug: "Street Name" contains
+    # the bare word "name" and must not be misread as a person's own name.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        tools = browser_ops.build_tools(profile, {}, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("street_split_fields.html"))
+            index = await _index_for(session, id_attr="street_name")
+            with pytest.raises(RuntimeError, match="street_name") as excinfo:
+                await tools.registry.execute_action(
+                    "fill_public",
+                    {"value": "fabricated", "element_index": index},
+                    browser_session=session,
+                )
+            assert "legal_name" not in str(excinfo.value)
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
 def test_halt_never_maps_to_a_status_and_carries_reason():
     result = _run(browser_ops.halt("captcha_or_bot_check", "looks like a captcha"))
     assert result.is_done is True

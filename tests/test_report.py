@@ -104,6 +104,70 @@ def test_merge_runs_supersedes_overlapping_distinct_source(tmp_path):
     assert "quote_result" not in merged.payloads["gamma-co"]
 
 
+def test_not_attempted_never_overwrites_an_earlier_real_result(tmp_path):
+    # A later run that ran out of budget before reaching a route must not
+    # erase a real result an earlier run already produced for it.
+    runs_root = tmp_path / "runs"
+    run_1, run_2 = "20260101T000000Z-aaaaaa", "20260103T000000Z-cccccc"
+
+    results_store.save_manifest(
+        run_1,
+        [PlannedRoute("alpha-co", "route-a", (), "contact", 1, "cheap")],
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        runs_root=runs_root,
+    )
+    results_store.save_result(
+        run_1, "alpha-co", 1,
+        quote_result=_qr(Status.MANUAL_HANDOFF, "route-a", "alpha-co"),
+        normalized_quote=build_normalized_quote(), origin="executed", runs_root=runs_root,
+    )
+
+    results_store.save_manifest(
+        run_2,
+        [PlannedRoute("alpha-co", "route-a", (), "contact", 1, "cheap")],
+        started_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+        runs_root=runs_root,
+    )
+    results_store.mark_not_attempted(run_2, "alpha-co", "batch wall-clock budget exhausted", runs_root=runs_root)
+
+    merged = report.merge_runs(runs_root=runs_root)
+    assert "quote_result" in merged.payloads["alpha-co"]
+    assert merged.payloads["alpha-co"]["quote_result"]["outcome"]["status"] == "manual_handoff"
+    assert report.not_attempted_distinct_ids(merged) == []
+
+
+def test_not_attempted_fills_a_gap_when_nothing_earlier_exists(tmp_path):
+    runs_root = tmp_path / "runs"
+    run_1 = "20260101T000000Z-aaaaaa"
+    results_store.save_manifest(
+        run_1,
+        [PlannedRoute("alpha-co", "route-a", (), "contact", 1, "cheap")],
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        runs_root=runs_root,
+    )
+    results_store.mark_not_attempted(run_1, "alpha-co", "batch wall-clock budget exhausted", runs_root=runs_root)
+
+    merged = report.merge_runs(runs_root=runs_root)
+    assert "quote_result" not in merged.payloads["alpha-co"]
+    assert report.not_attempted_distinct_ids(merged) == ["alpha-co"]
+
+
+def test_merge_runs_collects_notes_across_manifests_in_order(tmp_path):
+    runs_root = tmp_path / "runs"
+    results_store.save_manifest(
+        "20260101T000000Z-aaaaaa", [],
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc), runs_root=runs_root,
+        notes=["first note"],
+    )
+    results_store.save_manifest(
+        "20260102T000000Z-bbbbbb", [],
+        started_at=datetime(2026, 1, 2, tzinfo=timezone.utc), runs_root=runs_root,
+        notes=["second note", "third note"],
+    )
+    merged = report.merge_runs(runs_root=runs_root)
+    assert merged.notes == ("first note", "second note", "third note")
+
+
 def test_build_registry_snapshot_only_touches_primary_rows_never_last_verified_at(tmp_path):
     db_path = tmp_path / "allquote.db"
     _seed_registry(db_path)

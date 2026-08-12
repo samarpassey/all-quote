@@ -38,17 +38,25 @@ def save_manifest(
     *,
     started_at: datetime,
     runs_root: Path = RUNS_ROOT,
+    notes: list[str] = (),
 ) -> Path:
     """One row per distinct rate source, recording which registry row was
     chosen as representative and which were suppressed as non-primary —
     so a run report can tell "deliberately suppressed as a known duplicate"
     (named here) apart from "never planned at all" (absent here entirely).
+
+    `notes`: free-text, run-level context a caller wants attached to this
+    run specifically (e.g. "supersedes run X because Y") -- report.py
+    collects these across every merged run so the reason a run superseded
+    an earlier one is queryable from the run report, not just tribal
+    knowledge in a chat transcript.
     """
     path = run_dir(run_id, runs_root=runs_root) / "manifest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "run_id": run_id,
         "started_at": started_at.isoformat(),
+        "notes": list(notes),
         "routes": [
             {
                 "distinct_rate_source_id": p.distinct_rate_source_id,

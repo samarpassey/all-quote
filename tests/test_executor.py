@@ -67,7 +67,7 @@ def _gate_page_driver_factory():
     gate_box first, before ever looking at the outcome.
     """
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
         await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="budget", final_result=None, steps_used=1)
@@ -91,7 +91,7 @@ def _benchmark_extraction(**overrides) -> dict:
 
 
 def _done_driver_factory(extraction: dict):
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
         await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="done", final_result=json.dumps(extraction), steps_used=1)
@@ -267,7 +267,7 @@ def test_final_status_reflects_the_page_the_run_ended_on_not_a_stale_earlier_hit
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
 
         # Step 1: target_url is repro_page_a.html (run_route already
@@ -406,7 +406,7 @@ def test_halt_without_independent_gate_maps_to_unreachable(tmp_path, fixture_ser
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
         # Benign page -- the real hook finds nothing.
         await _tick_hook(hook, target_url, browser_session)
@@ -438,7 +438,7 @@ def test_halt_with_independent_gate_detector_wins(tmp_path, fixture_server, mark
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
         # captcha.html -- the real hook DOES find something here.
         await _tick_hook(hook, target_url, browser_session)
@@ -474,7 +474,7 @@ def test_budget_exhaustion_maps_to_unreachable_not_success(tmp_path, fixture_ser
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
         await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="budget", final_result=None, steps_used=max_steps)
@@ -529,7 +529,7 @@ def test_browser_process_stopped_after_transient_timeout_and_retry(
     profile, _, vault_path = vaulted_profile
     pids: list[int] = []
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
         pids.append(_real_pid(browser_session))
         raise TimeoutError("simulated asyncio.wait_for(agent.run(...)) timeout")
@@ -566,7 +566,7 @@ def test_browser_process_stopped_after_non_transient_exception(tmp_path, fixture
     profile, _, vault_path = vaulted_profile
     pids: list[int] = []
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         pids.append(_real_pid(browser_session))
         raise RuntimeError("simulated Agent construction failure")
 
@@ -601,7 +601,7 @@ def test_browser_process_stopped_after_gate_halt(tmp_path, fixture_server, marke
     profile, _, vault_path = vaulted_profile
     pids: list[int] = []
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
         pids.append(_real_pid(browser_session))
         await _tick_hook(hook, target_url, browser_session)
@@ -636,7 +636,7 @@ def test_transient_failure_retries_and_second_attempt_succeeds(tmp_path, fixture
     profile, _, vault_path = vaulted_profile
     calls = {"n": 0}
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ConnectionError("simulated transient failure on attempt 1")
@@ -674,7 +674,7 @@ def test_non_transient_failure_does_not_retry(tmp_path, fixture_server, market_r
     profile, _, vault_path = vaulted_profile
     calls = {"n": 0}
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         calls["n"] += 1
         raise ValueError("not a transient failure")
 
@@ -863,7 +863,7 @@ def test_non_live_never_touches_the_real_quote_url(tmp_path, fixture_server, mar
     profile, _, vault_path = vaulted_profile
     navigated_urls = []
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         navigated_urls.append(target_url)
         agent_box.append(_FakeAgent())
         await _tick_hook(hook, target_url, browser_session)
@@ -907,7 +907,7 @@ def test_sentinel_never_survives_in_any_evidence_artifact(tmp_path, fixture_serv
     sentinel = plaintext["licence_number"]
     evidence_root = tmp_path / "evidence"
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
         agent_box.append(_FakeAgent())
         await browser_session.get_browser_state_summary(include_screenshot=False)
         index = await browser_session.get_index_by_id("licence_number")

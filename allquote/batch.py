@@ -14,6 +14,7 @@ loop each wrap their work in try/except and fall back to a synthetic
 `unreachable` QuoteResult, then continue.
 """
 
+import functools
 import json
 import os
 import signal
@@ -115,14 +116,26 @@ def run_derived_route(
 # --- contact lane -------------------------------------------------------------
 
 
-def _run_contact_subprocess(market_id: str, model: str) -> dict[str, Any]:
+def _run_contact_subprocess(
+    market_id: str,
+    model: str,
+    *,
+    internal_timeout_s: float = INTERNAL_TIMEOUT_S,
+    hard_cap_s: float = PER_ROUTE_HARD_CAP_S,
+) -> dict[str, Any]:
     """Same mechanism the Task 7 Phase 2 probes used: subprocess in its own
     process group so a hard-cap timeout can kill the whole tree (including
-    Chromium), not just the python parent."""
+    Chromium), not just the python parent.
+
+    `internal_timeout_s` is handed to the executor CLI's own --timeout-seconds
+    (the budget run_route() gives one browser attempt); `hard_cap_s` is this
+    function's external kill trigger and must stay comfortably above it so a
+    route that legitimately times out internally gets to report that
+    cleanly, rather than being SIGKILLed mid-write."""
     cmd = [
         sys.executable, "-m", "allquote.executor", "run",
         "--market-id", market_id, "--live",
-        "--timeout-seconds", str(int(INTERNAL_TIMEOUT_S)), "--max-steps", "25",
+        "--timeout-seconds", str(int(internal_timeout_s)), "--max-steps", "25",
     ]
     env = dict(os.environ, EXECUTOR_MODEL=model)
     started = time.monotonic()
@@ -132,7 +145,7 @@ def _run_contact_subprocess(market_id: str, model: str) -> dict[str, Any]:
     )
     killed = False
     try:
-        stdout, stderr = proc.communicate(input="y\n", timeout=PER_ROUTE_HARD_CAP_S)
+        stdout, stderr = proc.communicate(input="y\n", timeout=hard_cap_s)
     except subprocess.TimeoutExpired:
         killed = True
         try:
@@ -187,14 +200,14 @@ ContactRunner = Callable[[str, str], dict[str, Any]]
 def _execute_contact_route(
     planned: planner.PlannedRoute, record: MarketRecord, *, contact_runner: ContactRunner,
     model: str, run_id: str, evidence_root: Path, profile: IntakeProfile,
-    vault_path: Path, vault_key: str | None,
+    vault_path: Path, vault_key: str | None, hard_cap_s: float = PER_ROUTE_HARD_CAP_S,
 ) -> QuoteResult:
     try:
         outcome = contact_runner(record.registry_id, model)
         if outcome["quote_result"] is not None:
             return QuoteResult.model_validate(outcome["quote_result"])
         reason = (
-            f"batch hard-cap kill after {PER_ROUTE_HARD_CAP_S:.0f}s" if outcome["killed"]
+            f"batch hard-cap kill after {hard_cap_s:.0f}s" if outcome["killed"]
             else f"subprocess exited rc={outcome['returncode']} with no parseable QuoteResult"
         )
     except Exception as exc:  # noqa: BLE001 - isolation boundary, see B4
@@ -212,20 +225,34 @@ def run_batch(
     *,
     records: list[MarketRecord] | None = None,
     profile: IntakeProfile | None = None,
-    contact_runner: ContactRunner = _run_contact_subprocess,
+    contact_runner: ContactRunner | None = None,
     evidence_root: Path = EVIDENCE_ROOT,
     vault_path: Path = vault.VAULT_PATH,
     vault_key: str | None = None,
     runs_root: Path = results_store.RUNS_ROOT,
     budget_s: float = DEFAULT_BUDGET_S,
     run_id: str | None = None,
+    internal_timeout_s: float = INTERNAL_TIMEOUT_S,
+    hard_cap_s: float = PER_ROUTE_HARD_CAP_S,
+    notes: list[str] = (),
 ) -> str:
     """`run_id`: pass a pre-generated id (results_store.new_run_id()) when a
     caller needs to know it before this function returns -- e.g. app.py's run
     console starts this in a background thread and polls
     data/runs/<run_id>/manifest.json, which save_manifest() below writes
-    almost immediately, long before any route finishes."""
+    almost immediately, long before any route finishes.
+
+    `internal_timeout_s`/`hard_cap_s`: per-route timeout override, default
+    unchanged (160s/190s) so existing callers (app.py's run console, tests)
+    see zero behaviour change unless they explicitly ask for something else.
+    Only applied when `contact_runner` is left at its default -- an
+    explicitly-passed contact_runner (e.g. a test fake) is used as-is."""
     from allquote import intake
+
+    if contact_runner is None:
+        contact_runner = functools.partial(
+            _run_contact_subprocess, internal_timeout_s=internal_timeout_s, hard_cap_s=hard_cap_s
+        )
 
     records = records if records is not None else registry.list_records()
     profile = profile if profile is not None else intake.load_profile()
@@ -237,7 +264,7 @@ def run_batch(
     run_id = run_id or results_store.new_run_id()
     batch_started = datetime.now(timezone.utc)
     batch_deadline = time.monotonic() + budget_s
-    results_store.save_manifest(run_id, planned, started_at=batch_started, runs_root=runs_root)
+    results_store.save_manifest(run_id, planned, started_at=batch_started, runs_root=runs_root, notes=notes)
 
     basis = derive_requested_basis(
         profile.coverage_benchmark, requested_basis_id=f"basis-{run_id}", captured_at=batch_started
@@ -276,7 +303,7 @@ def run_batch(
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as pool:
         for i in range(0, len(to_execute), MAX_CONCURRENT):
             chunk = to_execute[i:i + MAX_CONCURRENT]
-            if time.monotonic() + PER_ROUTE_HARD_CAP_S > batch_deadline:
+            if time.monotonic() + hard_cap_s > batch_deadline:
                 for p in chunk:
                     results_store.mark_not_attempted(run_id, p.distinct_rate_source_id, "batch wall-clock budget exhausted", runs_root=runs_root)
                     not_attempted.append(p.distinct_rate_source_id)
@@ -286,7 +313,7 @@ def run_batch(
                     _execute_contact_route, p, records_by_id[p.registry_id],
                     contact_runner=contact_runner, model=model_env[p.model_tier],
                     run_id=run_id, evidence_root=evidence_root, profile=profile,
-                    vault_path=vault_path, vault_key=vault_key,
+                    vault_path=vault_path, vault_key=vault_key, hard_cap_s=hard_cap_s,
                 ): p
                 for p in chunk
             }

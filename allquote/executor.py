@@ -49,6 +49,7 @@ from allquote.schemas import (
     QuoteSource,
     Status,
     ValidityInfo,
+    sensitive_fields,
 )
 
 EVIDENCE_ROOT = Path("data/evidence")
@@ -347,16 +348,68 @@ class AttemptOutcome:
     steps_used: int
 
 
-def _build_task_prompt(target_url: str) -> str:
+def _public_field_facts(profile: IntakeProfile) -> list[tuple[str, str]]:
+    """Every non-sensitive IntakeProfile field that has a real value, as
+    (dotted_name, value) pairs — the ONLY values fill_public may ever be
+    asked to type. Sensitive fields (VaultRef-typed) are excluded by
+    construction via schemas.sensitive_fields(), the same helper vault.py
+    and intake.py use to draw the identical line, so this list can never
+    accidentally include a vault token in place of a real fact.
+
+    This exists because the agent was previously told WHICH categories of
+    field to fill via fill_public (vehicle make/model/year, city, use type)
+    but never given the actual values anywhere in its context — with no
+    grounding, it fabricated plausible-sounding ones. This function is what
+    closes that gap: the task prompt embeds its output verbatim.
+    """
+    groups: list[tuple[str, Any]] = [
+        ("identity", profile.identity),
+        ("licence", profile.licence),
+        ("vehicle", profile.vehicle),
+        ("address", profile.address),
+        ("coverage_benchmark", profile.coverage_benchmark),
+        ("contact", profile.contact),
+        ("use", profile.use),
+        ("history", profile.history),
+    ]
+    facts: list[tuple[str, str]] = []
+    for group_name, submodel in groups:
+        if submodel is None:
+            continue
+        sensitive_names = sensitive_fields(type(submodel))
+        for field_name, info in type(submodel).model_fields.items():
+            if field_name in sensitive_names:
+                continue
+            value = getattr(submodel, field_name)
+            if value is None or value == [] or value == {}:
+                continue
+            key = info.alias or field_name
+            facts.append((f"{group_name}.{key}", str(value)))
+    return facts
+
+
+def _build_task_prompt(target_url: str, profile: IntakeProfile) -> str:
+    facts = _public_field_facts(profile)
+    facts_block = "\n".join(f"  {name} = {value}" for name, value in facts) or "  (none on file)"
     return (
         f"You are filling out an Ontario private-passenger auto insurance quote form "
         f"starting at {target_url}.\n\n"
-        "Use fill_public(value, element_index) for ordinary, non-sensitive fields "
-        "(vehicle make/model/year, city, use type, and similar).\n\n"
+        "PROFILE FACTS — the ONLY values you may type into a non-sensitive field. Never "
+        "invent, guess, or substitute a plausible-sounding value for anything not listed "
+        "here, even to satisfy a field that appears required:\n"
+        f"{facts_block}\n\n"
+        "Use fill_public(value, element_index) for a non-sensitive field ONLY when the "
+        "field is asking for one of the facts above — pass that exact value, never a "
+        "paraphrase or a value you made up. If a non-sensitive field on the page has no "
+        "matching fact above, leave it blank rather than fabricate one. fill_public will "
+        "itself refuse identity-shaped fields (name, licence, date of birth, address, "
+        "phone, email, VIN) even if you try — those always go through fill_sensitive.\n\n"
         "Use fill_sensitive(field_name, element_index) for sensitive fields — pass ONLY "
-        "the field name (e.g. licence_number, date_of_birth, vin, email, mobile, street, "
-        "postal_code), never a value. You never see the real value; it is injected "
-        "automatically. Never fabricate a sensitive value yourself.\n\n"
+        "the field name (e.g. legal_name, licence_number, date_of_birth, vin, email, "
+        "mobile, street, postal_code), never a value. If the site asks for street number "
+        "and street name as two separate fields instead of one combined street field, use "
+        "street_number and street_name instead of street. You never see the real value; it "
+        "is injected automatically. Never fabricate a sensitive value yourself.\n\n"
         "If you encounter any of the following, call halt(gate_kind, reason) immediately "
         "and do not proceed past it: a request to log in or create an account; a CAPTCHA "
         "or bot check; a consent or terms checkbox requiring personal affirmation; a "
@@ -382,10 +435,11 @@ async def _default_agent_runner(
     target_url: str,
     max_steps: int,
     timeout_s: float,
+    profile: IntakeProfile,
 ) -> AttemptOutcome:
     llm = ChatAnthropic(model=os.environ["EXECUTOR_MODEL"])
     agent = Agent(
-        task=_build_task_prompt(target_url),
+        task=_build_task_prompt(target_url, profile),
         llm=llm,
         tools=tools,
         browser_session=browser_session,
@@ -404,6 +458,16 @@ async def _default_agent_runner(
 
 
 # --- run_route ------------------------------------------------------------------
+
+
+def _resolve_headless(headless: bool) -> bool:
+    """HEADLESS env var overrides the passed-in default when set (any of
+    "0"/"false"/"no"/"" means show a visible window); unset leaves `headless`
+    untouched, so tests and the batch (which never set it) are unaffected."""
+    raw = os.environ.get("HEADLESS")
+    if raw is None:
+        return headless
+    return raw.strip().lower() not in ("0", "false", "no", "")
 
 
 class _RetryAttempt(Exception):
@@ -454,7 +518,9 @@ async def _run_single_attempt(
     gate_box: list[gates.GateHit] = []
     agent_box: list[Any] = []
     tools = browser_ops.build_tools(profile, sensitive_data, vault_path=vault_path, vault_key=vault_key)
-    browser_session = BrowserSession(browser_profile=BrowserProfile(headless=headless, keep_alive=True))
+    browser_session = BrowserSession(
+        browser_profile=BrowserProfile(headless=_resolve_headless(headless), keep_alive=True)
+    )
     started = time.monotonic()
     outcome: AttemptOutcome | None = None
     attempt_exception: BaseException | None = None
@@ -498,6 +564,7 @@ async def _run_single_attempt(
                 target_url=target_url,
                 max_steps=max_steps,
                 timeout_s=timeout_s,
+                profile=profile,
             )
         except Exception as exc:
             # Not BaseException: KeyboardInterrupt/SystemExit must propagate,

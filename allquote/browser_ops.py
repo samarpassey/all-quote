@@ -65,6 +65,7 @@ API calls — see tests/test_browser_ops.py):
 
 import json
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,34 @@ from allquote.schemas import IntakeProfile
 # --- fill_sensitive / fill_public / halt ------------------------------------
 
 
+_STREET_NUMBER_PATTERN = re.compile(r"^(\d+[A-Za-z]?(?:-\d+[A-Za-z]?)?)\s+(.+)$")
+
+
+def _split_street(value: str) -> tuple[str, str]:
+    """Splits a real, already-resolved "123 Main Street" into
+    (street_number, street_name) for sites that ask for them as two separate
+    fields instead of one. Only ever runs on the real vaulted value -- never
+    invents or guesses a number/name that isn't in the real address. Falls
+    back to ("", whole value) for an address that doesn't start with a
+    leading civic number, rather than guessing a split."""
+    match = _STREET_NUMBER_PATTERN.match(value.strip())
+    if not match:
+        return "", value.strip()
+    return match.group(1), match.group(2)
+
+
+# field_name -> (real IntakeAddress field it's derived from, splitter).
+# NOT a new vault entry and NOT added to vault.SENSITIVE_FIELD_NAMES (that
+# set is strictly schemas.py-derived, the single source of truth for what's
+# actually vaulted) -- these are resolve-time-only aliases for sites that
+# split a single stored field into more than one form field. CAA's driver
+# details step does this for street address.
+_DERIVED_SENSITIVE_FIELDS: dict[str, tuple[str, Callable[[str], str]]] = {
+    "street_number": ("street", lambda v: _split_street(v)[0]),
+    "street_name": ("street", lambda v: _split_street(v)[1]),
+}
+
+
 def _resolve_sensitive_value(
     profile: IntakeProfile,
     field_name: str,
@@ -87,9 +116,11 @@ def _resolve_sensitive_value(
     vault_path: Path,
     vault_key: str | None,
 ) -> str:
+    base_field_name, transform = _DERIVED_SENSITIVE_FIELDS.get(field_name, (field_name, None))
     for name, ref in iter_profile_refs(profile):
-        if name == field_name:
-            return vault.resolve(ref, vault_path=vault_path, vault_key=vault_key)
+        if name == base_field_name:
+            value = vault.resolve(ref, vault_path=vault_path, vault_key=vault_key)
+            return transform(value) if transform else value
     raise KeyError(f"no vault-backed value for field_name {field_name!r} on this profile")
 
 
@@ -120,6 +151,88 @@ async def _mask_input_css(browser_session: BrowserSession, element_index: int) -
         )
     except Exception:
         pass
+
+
+# --- fill_public identity-shaped-field guard --------------------------------
+#
+# fill_public used to accept whatever string the LLM supplied for ANY field,
+# with the sensitive/non-sensitive split enforced by prompt instruction only.
+# Confirmed in a live run: the model called fill_public("John", ...) /
+# fill_public("Smith", ...) directly on real name fields on two live insurer
+# sites, bypassing fill_sensitive (and the vault) entirely. This is the
+# code-level backstop: fill_public inspects the target element's own
+# name/id/autocomplete/placeholder/aria-label attributes plus its computed
+# accessibility name (browser_session's EnhancedDOMTreeNode.ax_node.name,
+# which already resolves an associated <label>, aria-labelledby, etc. the
+# same way a screen reader would) and refuses to type into anything that
+# looks identity-shaped, regardless of what the model intended to put there.
+# Checked IN ORDER, first match wins -- an ordered list, not a dict, because
+# "Street Name" and "Street Number" must be caught by their own specific
+# rule BEFORE the generic "street" rule (which would suggest fill_sensitive
+# field_name="street" -- the FULL combined address -- for what is actually a
+# number-only or name-only input) and before the generic "legal_name" rule
+# (which would otherwise also match the bare word "name" inside "Street
+# Name" and wrongly suggest typing the person's own name into it).
+_IDENTITY_SIGNAL_RULES: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "street_number",
+        re.compile(
+            r"\b(street|address|civic)\b.*\b(number|no)\b"
+            r"|\b(number|no)\b.*\b(street|address|civic)\b"
+            r"|\bhouse\s*number\b|\bcivic\s*number\b"
+        ),
+    ),
+    ("street_name", re.compile(r"\b(street|address)\b.*\bname\b|\bname\b.*\b(street|address)\b")),
+    ("street", re.compile(r"\b(address|street)\b")),
+    ("legal_name", re.compile(r"\b(first|last|full|legal|given|middle|sur|user)?\s*name\b")),
+    ("licence_number", re.compile(r"\blicen[cs]e\b")),
+    ("date_of_birth", re.compile(r"\b(dob|birth\s*date|date\s*of\s*birth)\b")),
+    ("mobile", re.compile(r"\b(phone|mobile|tel(ephone)?)\b")),
+    ("email", re.compile(r"\bemail\b")),
+    ("vin", re.compile(r"\bvin\b")),
+]
+
+
+def _humanize_tokens(raw: str) -> str:
+    """camelCase / snake_case / kebab-case / trailing-digit -> space-separated
+    lowercase words, so a word-boundary regex sees "vinNumber" as "vin
+    number" and "address1" as "address 1" (both matching), without also
+    matching "vin" inside unrelated words like "province" or "driving"
+    (which have no such boundary and must NOT match)."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", raw)
+    spaced = re.sub(r"(?<=[a-zA-Z])(?=[0-9])", " ", spaced)
+    spaced = re.sub(r"[_\-]+", " ", spaced)
+    return spaced.lower()
+
+
+def _identity_signal_text(node: Any) -> str:
+    # VALUES only, never the attribute KEY names — "name" is itself an HTML
+    # attribute every form field has (e.g. <input name="make">), so
+    # labelling values with their key ("name make") would make the literal
+    # word "name" appear on every field and defeat this check entirely.
+    parts: list[str] = []
+    attributes = getattr(node, "attributes", None) or {}
+    for key in ("name", "id", "autocomplete", "placeholder", "aria-label", "type"):
+        value = attributes.get(key)
+        if value:
+            parts.append(str(value))
+    ax_node = getattr(node, "ax_node", None)
+    ax_name = getattr(ax_node, "name", None) if ax_node is not None else None
+    if ax_name:
+        parts.append(ax_name)
+    return _humanize_tokens(" ".join(parts))
+
+
+def _matched_identity_field(node: Any) -> str | None:
+    """The fill_sensitive field name (including the street_number/street_name
+    derived aliases) this element looks like, or None if it doesn't match
+    any identity-shaped pattern. Checks _IDENTITY_SIGNAL_RULES in order --
+    see that list's comment for why order matters here."""
+    text = _identity_signal_text(node)
+    for field_name, pattern in _IDENTITY_SIGNAL_RULES:
+        if pattern.search(text):
+            return field_name
+    return None
 
 
 async def _type_into_index(
@@ -196,13 +309,16 @@ def build_tools(
     @tools.action(
         "Fill a sensitive field (licence number, DOB, VIN, address, etc.) into the "
         "element at the given index. Pass only the field NAME — never the value, "
-        "which you never see. Raises if field_name is not a recognized sensitive field."
+        "which you never see. If the site splits street address into two fields, "
+        "use street_number and street_name instead of street. Raises if field_name "
+        "is not a recognized sensitive field."
     )
     async def fill_sensitive(field_name: str, element_index: int, browser_session: BrowserSession) -> ActionResult:
-        if field_name not in vault.SENSITIVE_FIELD_NAMES:
+        if field_name not in vault.SENSITIVE_FIELD_NAMES and field_name not in _DERIVED_SENSITIVE_FIELDS:
             raise ValueError(
                 f"{field_name!r} is not a recognized sensitive field "
-                f"(see allquote.vault.SENSITIVE_FIELD_NAMES)"
+                f"(see allquote.vault.SENSITIVE_FIELD_NAMES, or street_number/street_name "
+                f"for a site that splits street address into two fields)"
             )
         value = _resolve_sensitive_value(profile, field_name, vault_path=vault_path, vault_key=vault_key)
         sensitive_data[field_name] = value
@@ -211,8 +327,22 @@ def build_tools(
             browser_session, element_index, value, is_sensitive=True, sensitive_key_name=field_name
         )
 
-    @tools.action("Fill a non-sensitive value into the element at the given index.")
+    @tools.action(
+        "Fill a non-sensitive value into the element at the given index. Refuses "
+        "identity-shaped fields (name, licence, DOB, address, phone, email, VIN) — "
+        "use fill_sensitive for those instead."
+    )
     async def fill_public(value: str, element_index: int, browser_session: BrowserSession) -> ActionResult:
+        node = await browser_session.get_dom_element_by_index(element_index)
+        if node is not None:
+            matched = _matched_identity_field(node)
+            if matched is not None:
+                raise ValueError(
+                    f"element index {element_index} looks like an identity field "
+                    f"({matched}, based on its name/label/autocomplete attribute) — "
+                    f"fill_public refuses identity-shaped fields. Use "
+                    f"fill_sensitive(field_name={matched!r}, element_index={element_index}) instead."
+                )
         return await _type_into_index(
             browser_session, element_index, value, is_sensitive=False, sensitive_key_name=None
         )

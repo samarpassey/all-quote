@@ -52,6 +52,14 @@ class _AppHandler(BaseHTTPRequestHandler):
     profile_path: Path = intake.PROFILE_PATH
     run_batch_fn: BatchRunner = staticmethod(batch.run_batch)
 
+    # Guards concurrent /api/run/start calls -- BaseHTTPRequestHandler makes a
+    # fresh instance per request, so this state has to live on the CLASS to
+    # be visible across requests. _handler_class() below gives every bound
+    # subclass its OWN lock/id (never inherited from _AppHandler directly),
+    # so unrelated server instances (e.g. different tests) never share state.
+    _run_lock: threading.Lock = threading.Lock()
+    _active_run_id: str | None = None
+
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         # Same discipline as intake.py's handler: only method/path/status
         # from our own attributes, never anything derived from a request body.
@@ -191,12 +199,24 @@ class _AppHandler(BaseHTTPRequestHandler):
         )
 
     def _handle_run_start(self) -> None:
-        profile = intake.load_profile(path=self.profile_path)
-        if profile is None:
-            self._send_json(400, {"error": "no stored intake profile — visit /intake first"})
-            return
+        cls = type(self)
+        with cls._run_lock:
+            if cls._active_run_id is not None:
+                # A click while a batch is already in flight must never spawn
+                # a second one -- four unintended full-registry batches hit
+                # live insurer sites this way. Hand back the same run_id so
+                # the console can just keep polling it.
+                self._send_json(200, {"run_id": cls._active_run_id, "already_running": True})
+                return
 
-        run_id = results_store.new_run_id()
+            profile = intake.load_profile(path=self.profile_path)
+            if profile is None:
+                self._send_json(400, {"error": "no stored intake profile — visit /intake first"})
+                return
+
+            run_id = results_store.new_run_id()
+            cls._active_run_id = run_id
+
         records = registry.list_records(db_path=self.db_path)
         run_batch_fn = self.run_batch_fn
 
@@ -212,9 +232,13 @@ class _AppHandler(BaseHTTPRequestHandler):
                 )
             except Exception as exc:  # noqa: BLE001 - background thread, must not crash the server
                 sys.stderr.write(f"batch run {run_id} failed: {type(exc).__name__}\n")
+            finally:
+                with cls._run_lock:
+                    if cls._active_run_id == run_id:
+                        cls._active_run_id = None
 
         threading.Thread(target=_go, daemon=True).start()
-        self._send_json(200, {"run_id": run_id})
+        self._send_json(200, {"run_id": run_id, "already_running": False})
 
 
 def _handler_class(
@@ -238,6 +262,12 @@ def _handler_class(
             "vault_key": vault_key,
             "profile_path": profile_path,
             "run_batch_fn": staticmethod(run_batch_fn),
+            # Own lock/state per bound class -- never the shared _AppHandler
+            # base's -- so unrelated server instances (different tests, or a
+            # future second server in the same process) can't see each
+            # other's in-flight run.
+            "_run_lock": threading.Lock(),
+            "_active_run_id": None,
         },
     )
 

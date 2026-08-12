@@ -1,6 +1,7 @@
 import http.client
 import json
 import threading
+import time
 from http.server import ThreadingHTTPServer
 
 from allquote import app, intake, results_store
@@ -10,6 +11,15 @@ from tests.test_report import _seed_registry, _seed_two_runs
 
 def _noop_batch_runner(**kwargs):
     return kwargs.get("run_id", "unused")
+
+
+def _wait_until(predicate, *, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
 
 
 def _start_app(tmp_path, *, run_batch_fn=_noop_batch_runner):
@@ -185,5 +195,66 @@ def test_run_start_with_profile_delegates_to_injected_batch_runner(tmp_path):
         assert captured["run_id"] == run_id
         assert captured["profile"].identity is not None
         assert captured["runs_root"] == tmp_path / "runs"
+    finally:
+        _stop(httpd, thread)
+
+
+def test_run_start_refuses_concurrent_run_then_allows_a_new_one_after_completion(tmp_path):
+    # Four unintended full-registry batches hit live insurer sites because
+    # repeated clicks each spawned a new batch. This is the regression test.
+    _seed_registry(tmp_path / "allquote.db")
+    intake.save_profile(build_intake_profile(), path=tmp_path / "profile.json")
+
+    call_count = {"n": 0}
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_run_batch(**kwargs):
+        call_count["n"] += 1
+        started.set()
+        release.wait(timeout=5)
+        return kwargs["run_id"]
+
+    httpd, thread = _start_app(tmp_path, run_batch_fn=fake_run_batch)
+    try:
+
+        def post_start():
+            conn = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1])
+            conn.request("POST", "/api/run/start")
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            conn.close()
+            return resp.status, data
+
+        status1, data1 = post_start()
+        assert status1 == 200
+        assert data1["already_running"] is False
+        run_id_1 = data1["run_id"]
+        assert started.wait(timeout=2)
+
+        # Second click while the first batch is still in flight: no second
+        # batch spawned, same run_id handed back.
+        status2, data2 = post_start()
+        assert status2 == 200
+        assert data2["already_running"] is True
+        assert data2["run_id"] == run_id_1
+        assert call_count["n"] == 1
+
+        release.set()
+        handler_cls = httpd.RequestHandlerClass
+        assert _wait_until(lambda: handler_cls._active_run_id is None, timeout=5)
+
+        # A third click, now that the first batch has actually finished,
+        # must start a genuinely new run.
+        started.clear()
+        release.clear()
+        status3, data3 = post_start()
+        assert status3 == 200
+        assert data3["already_running"] is False
+        assert data3["run_id"] != run_id_1
+        assert started.wait(timeout=2)
+        assert call_count["n"] == 2
+        release.set()
+        assert _wait_until(lambda: handler_cls._active_run_id is None, timeout=5)
     finally:
         _stop(httpd, thread)
