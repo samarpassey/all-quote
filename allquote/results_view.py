@@ -442,7 +442,13 @@ __THEME_CSS__
       body.appendChild(tr);
 
       if (expanded === r.distinct_rate_source_id) {
-        body.appendChild(el('<tr class="drawer-row"><td colspan="9">' + drawerHtml(r) + "</td></tr>"));
+        // class="wrap" -- table.ledger td defaults to white-space: nowrap
+        // (right for dense one-line cells elsewhere in the ledger); the
+        // drawer holds prose and a long evidence URL, both of which need to
+        // wrap, not run off the edge of the (already horizontally-scrolled)
+        // table. Reuses the existing td.wrap override rather than inventing
+        // a second one.
+        body.appendChild(el('<tr class="drawer-row"><td colspan="9" class="wrap">' + drawerHtml(r) + "</td></tr>"));
       }
     });
   }

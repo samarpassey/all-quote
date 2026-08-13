@@ -100,7 +100,7 @@ table.ledger { width: 100%; border-collapse: collapse; line-height: 1.35; font-s
 table.ledger th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; line-height: 1.4; color: var(--text-muted); padding: 6px 10px; border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
 table.ledger th.sortable { cursor: pointer; }
 table.ledger th.sortable:hover { color: var(--text-body); }
-th#th-premium { white-space: normal; max-width: 200px; }
+th#th-premium { white-space: normal; min-width: 190px; max-width: 200px; }
 th#th-premium .th-main { display: block; }
 th#th-premium .th-note {
   display: block; text-transform: none; font-weight: 400; font-size: 11px;
@@ -131,7 +131,7 @@ table.ledger tbody tr.row-clickable { cursor: pointer; }
   line-height: 1.4; color: var(--text-muted); margin: 18px 0 8px;
 }
 .drawer h3:first-child { margin-top: 0; }
-.drawer-field { font-size: 12px; color: var(--text-body); margin: 0 0 6px; }
+.drawer-field { font-size: 12px; color: var(--text-body); margin: 0 0 6px; max-width: 640px; overflow-wrap: anywhere; }
 .drawer-field .k { color: var(--text-label); margin-right: 6px; }
 .drawer img.evidence-shot { max-width: 100%; border: 1px solid var(--border); margin-top: 6px; }
 .evidence-hash { color: var(--text-label); word-break: break-all; }
