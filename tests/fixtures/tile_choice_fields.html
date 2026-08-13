@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head><title>Get a quote - licence type tiles</title></head>
+<body>
+  <h1>Driver details</h1>
+  <form>
+    <p>What type of licence do you currently hold?</p>
+    <div id="tile_option_a" role="button" tabindex="0"
+         onclick="document.getElementById('tile_result').value='A'">Unrestricted</div>
+    <div id="tile_option_b" role="button" tabindex="0"
+         onclick="document.getElementById('tile_result').value='B'">Learners</div>
+    <input type="hidden" id="tile_result" value="">
+
+    <div id="tile_identity" role="button" tabindex="0" aria-label="Select licence on file"
+         onclick="document.getElementById('tile_identity_result').value='clicked'">Use saved licence</div>
+    <input type="hidden" id="tile_identity_result" value="">
+  </form>
+</body>
+</html>

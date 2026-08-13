@@ -236,6 +236,38 @@ def _spec_to_json() -> list[dict]:
     return [{k: v for k, v in spec.items() if k != "model"} for spec in GROUP_SPECS]
 
 
+def _prefill_payload(profile: IntakeProfile | None) -> dict:
+    """Built from an already-saved profile, shaped for the client: real
+    values for non-sensitive fields (`values`), and — for sensitive fields —
+    only the list of field KEYS that already have a vaulted value
+    (`stored`), never the VaultRef token itself, let alone the plaintext it
+    points to. This is the only thing GET /intake ever tells the browser
+    about a sensitive field."""
+    if profile is None:
+        return {}
+    dumped = profile.model_dump(mode="json", by_alias=True)
+    prefill: dict[str, dict] = {}
+    for spec in GROUP_SPECS:
+        raw = dumped.get(spec["key"])
+        if not raw:
+            continue
+        values: dict[str, Any] = {}
+        stored: list[str] = []
+        for field in spec["fields"]:
+            key = field["key"]
+            if key not in raw:
+                continue
+            value = raw[key]
+            if field["sensitive"]:
+                if not _is_empty_value(value):
+                    stored.append(key)
+            elif not _is_empty_value(value):
+                values[key] = value
+        if values or stored:
+            prefill[spec["key"]] = {"values": values, "stored": stored}
+    return prefill
+
+
 # --- submission -> IntakeProfile, sensitive values -> vault ---------------------
 
 
@@ -245,6 +277,7 @@ def _extract_group_kwargs(
     vault_path: Path,
     vault_key: str | None,
     vaulted_out: list[str],
+    existing_group: Any = None,
 ) -> dict:
     kwargs: dict[str, Any] = {}
     for field in spec["fields"]:
@@ -265,19 +298,32 @@ def _extract_group_kwargs(
             kwargs[name] = value
             continue
 
+        # The form never shows a sensitive field's plaintext to retype —
+        # only a "stored" indicator (see _prefill_payload) — so a blank
+        # submission here means "unchanged," not "erase," whenever a value
+        # was already vaulted. `existing_group` carries the VaultRef(s) to
+        # preserve; nothing here ever reads or needs the plaintext itself.
+        existing_value = getattr(existing_group, name, None) if existing_group is not None else None
+
         if field["kind"] == "list-text":
             items = [v.strip() for v in (value or []) if isinstance(v, str) and v.strip()]
-            refs = [
-                vault.put(name, v, vault_path=vault_path, vault_key=vault_key) for v in items
-            ]
-            if refs:
+            if items:
+                refs = [
+                    vault.put(name, v, vault_path=vault_path, vault_key=vault_key) for v in items
+                ]
                 vaulted_out.append(name)
-            kwargs[name] = refs
+                kwargs[name] = refs
+            elif existing_value:
+                kwargs[name] = list(existing_value)
+            else:
+                kwargs[name] = []
         else:
             text = value.strip() if isinstance(value, str) else ""
             if text:
                 kwargs[name] = vault.put(name, text, vault_path=vault_path, vault_key=vault_key)
                 vaulted_out.append(name)
+            elif existing_value:
+                kwargs[name] = existing_value
             else:
                 kwargs[name] = None
     return kwargs
@@ -316,6 +362,7 @@ def _build_group(
     vault_path: Path,
     vault_key: str | None,
     vaulted_out: list[str],
+    existing_group: Any = None,
 ):
     raw = payload.get(spec["key"])
     if not raw or (not spec["demo_critical"] and not _group_has_content(spec, raw)):
@@ -325,7 +372,7 @@ def _build_group(
     if spec["key"] == "consent" and not raw.get("consent_timestamp"):
         raw = dict(raw)
         raw["consent_timestamp"] = datetime.now(timezone.utc).isoformat()
-    kwargs = _extract_group_kwargs(spec, raw, vault_path, vault_key, vaulted_out)
+    kwargs = _extract_group_kwargs(spec, raw, vault_path, vault_key, vaulted_out, existing_group)
     return spec["model"](**kwargs)
 
 
@@ -334,19 +381,33 @@ def build_profile_from_submission(
     *,
     vault_path: Path = vault.VAULT_PATH,
     vault_key: str | None = None,
+    existing_profile: IntakeProfile | None = None,
 ) -> tuple[IntakeProfile, list[str]]:
     """Build an IntakeProfile from a submitted JSON object. Every sensitive
     field's plaintext goes to `vault.put()` and only the returned VaultRef is
     kept; the caller gets back the profile plus the sorted list of sensitive
     field NAMES that were vaulted (never values) for the confirmation view
     and the consent receipt.
+
+    `existing_profile`, when given, lets a blank sensitive field on a
+    re-submission keep its previously vaulted value instead of being read as
+    "delete this" — the form only ever shows a "stored" indicator for a
+    sensitive field, never the plaintext to retype, so blank must mean
+    unchanged.
     """
     if not isinstance(payload, dict):
         raise ValueError("submission payload must be a JSON object")
 
     vaulted: list[str] = []
     groups = {
-        spec["key"]: _build_group(spec, payload, vault_path, vault_key, vaulted)
+        spec["key"]: _build_group(
+            spec,
+            payload,
+            vault_path,
+            vault_key,
+            vaulted,
+            existing_group=getattr(existing_profile, spec["key"], None) if existing_profile else None,
+        )
         for spec in GROUP_SPECS
     }
     profile = IntakeProfile(**groups)
@@ -368,14 +429,19 @@ def load_profile(path: Path = PROFILE_PATH) -> IntakeProfile | None:
 # --- HTML generation --------------------------------------------------------------
 
 
-def render_html() -> str:
+def render_html(*, profile_path: Path = PROFILE_PATH) -> str:
     payload = json.dumps(_spec_to_json(), separators=(",", ":")).replace("</", "<\\/")
-    return _TEMPLATE.replace("__ALLQUOTE_SPEC__", payload)
+    prefill = json.dumps(
+        _prefill_payload(load_profile(path=profile_path)), separators=(",", ":")
+    ).replace("</", "<\\/")
+    return (
+        _TEMPLATE.replace("__ALLQUOTE_SPEC__", payload).replace("__ALLQUOTE_PREFILL__", prefill)
+    )
 
 
-def generate(output_path: Path = OUTPUT_PATH) -> Path:
+def generate(output_path: Path = OUTPUT_PATH, *, profile_path: Path = PROFILE_PATH) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_html())
+    output_path.write_text(render_html(profile_path=profile_path))
     return output_path
 
 
@@ -432,8 +498,12 @@ class _IntakeHandler(BaseHTTPRequestHandler):
             del body
 
         try:
+            existing_profile = load_profile(path=self.profile_path)
             profile, vaulted = build_profile_from_submission(
-                payload, vault_path=self.vault_path, vault_key=self.vault_key
+                payload,
+                vault_path=self.vault_path,
+                vault_key=self.vault_key,
+                existing_profile=existing_profile,
             )
         except (ValidationError, ValueError, KeyError):
             # Deliberately generic: never fold the exception (which may quote
@@ -497,7 +567,7 @@ def serve(
     vault_key: str | None = None,
     profile_path: Path = PROFILE_PATH,
 ) -> None:
-    html_path = generate()
+    html_path = generate(profile_path=profile_path)
     handler_cls = _handler_class(
         intake_html=html_path.read_bytes(),
         vault_path=vault_path,
@@ -973,14 +1043,22 @@ section.block > h2 {
     <div class="error-banner" id="error-banner" hidden></div>
   </div>
 
+  <div class="submit-row">
+    <button type="button" id="find-quotes-action" class="submit-action">Find quotes &rarr;</button>
+    <div class="field-help">starts a run against the saved profile — save first if you changed anything above</div>
+    <div class="error-banner" id="find-quotes-error" hidden></div>
+  </div>
+
 </div>
 
 <script id="allquote-spec" type="application/json">__ALLQUOTE_SPEC__</script>
+<script id="allquote-prefill" type="application/json">__ALLQUOTE_PREFILL__</script>
 <script>
 (function () {
   "use strict";
 
   var SPEC = JSON.parse(document.getElementById("allquote-spec").textContent);
+  var PREFILL = JSON.parse(document.getElementById("allquote-prefill").textContent);
   var SPEC_BY_KEY = {};
   SPEC.forEach(function (s) { SPEC_BY_KEY[s.key] = s; });
 
@@ -1003,12 +1081,21 @@ section.block > h2 {
     }
   }
 
+  function isStored(field, groupKey) {
+    if (!field.sensitive) return false;
+    var groupPrefill = PREFILL[groupKey];
+    return !!(groupPrefill && (groupPrefill.stored || []).indexOf(field.key) !== -1);
+  }
+
   function renderField(field, groupKey) {
     if (field.kind === "datetime") return "";
 
     var id = fieldId(groupKey, field.key);
     var reqMark = field.required ? '<span class="required-mark">*</span>' : "";
     var lock = field.sensitive ? '<span class="lock" aria-hidden="true">&#9111;</span>' : "";
+    var storedNote = isStored(field, groupKey)
+      ? '<div class="field-help">&#8226;&#8226;&#8226;&#8226; stored — leave blank to keep it</div>'
+      : "";
 
     if (field.kind === "checkbox") {
       // Booleans are never "required" — an unchecked box is a meaningful
@@ -1064,8 +1151,14 @@ section.block > h2 {
       control = '<input type="text" autocomplete="off" id="' + id + '"' + (field.required ? " required" : "") + '>';
     }
 
-    return '<div class="field-row" id="row-' + id + '">' + labelHtml + control +
+    return '<div class="field-row" id="row-' + id + '">' + labelHtml + control + storedNote +
       '<div class="field-error" id="err-' + id + '" hidden></div></div>';
+  }
+
+  function groupHasPrefill(groupKey) {
+    var groupPrefill = PREFILL[groupKey];
+    if (!groupPrefill) return false;
+    return Object.keys(groupPrefill.values || {}).length > 0 || (groupPrefill.stored || []).length > 0;
   }
 
   function renderSection(spec, isFirstSensitive) {
@@ -1074,12 +1167,18 @@ section.block > h2 {
       ? '<div class="sensitive-note">encrypted at rest — never written to logs, prompts or screenshots</div>'
       : "";
 
+    // An optional group with a saved value is opened by default — the
+    // point of prefill is to show what is already on file, not to hide it
+    // behind a "+ Add" toggle the user has to know to click.
+    var open = spec.demo_critical || groupHasPrefill(spec.key);
+
     var header = spec.demo_critical
       ? '<h2>' + esc(spec.title) + '</h2>'
-      : '<button type="button" class="section-toggle" data-group="' + spec.key + '">+ Add ' +
+      : '<button type="button" class="section-toggle' + (open ? " active" : "") +
+        '" data-group="' + spec.key + '">' + (open ? "&minus; " : "+ Add ") +
         esc(spec.title.toLowerCase()) + '</button>';
 
-    var fieldsAttrs = 'id="fields-' + spec.key + '"' + (spec.demo_critical ? "" : " hidden");
+    var fieldsAttrs = 'id="fields-' + spec.key + '"' + (open ? "" : " hidden");
 
     return '<section class="form-section" data-group="' + spec.key + '">' +
       '<div class="section-num">' + esc(spec.number) + '</div>' +
@@ -1091,6 +1190,50 @@ section.block > h2 {
   var root = document.getElementById("form-root");
   SPEC.forEach(function (spec) {
     root.insertAdjacentHTML("beforeend", renderSection(spec, spec.key === firstSensitiveKey));
+  });
+
+  function applyPrefillValue(field, groupKey, value) {
+    var id = fieldId(groupKey, field.key);
+    if (field.kind === "checkbox") {
+      document.getElementById(id).checked = !!value;
+    } else if (field.kind === "checkbox-list") {
+      var wanted = {};
+      (value || []).forEach(function (v) { wanted[v] = true; });
+      document.querySelectorAll('[data-cbgroup="' + id + '"]').forEach(function (cb) {
+        cb.checked = !!wanted[cb.value];
+      });
+    } else if (field.kind === "list-text") {
+      document.getElementById(id).value = (value || []).join("\n");
+    } else if (field.kind === "ab-toggle") {
+      (field.items || []).forEach(function (item) {
+        var v = (value || {})[item.key];
+        if (!v) return;
+        var itemGroup = document.querySelector(
+          '.toggle-group[data-abgroup="' + id + '"][data-item="' + item.key + '"]'
+        );
+        if (!itemGroup) return;
+        itemGroup.querySelectorAll(".toggle-option").forEach(function (b) {
+          b.classList.toggle("active", b.getAttribute("data-value") === v);
+        });
+      });
+    } else {
+      var input = document.getElementById(id);
+      if (input) input.value = value;
+    }
+  }
+
+  // Every non-sensitive value already on file, applied straight onto the
+  // rendered inputs — sensitive fields are never touched here, they only
+  // ever get the "stored" note rendered above (see isStored/renderField).
+  SPEC.forEach(function (spec) {
+    var groupPrefill = PREFILL[spec.key];
+    if (!groupPrefill) return;
+    var values = groupPrefill.values || {};
+    spec.fields.forEach(function (f) {
+      if (f.sensitive || f.kind === "datetime") return;
+      if (!(f.key in values)) return;
+      applyPrefillValue(f, spec.key, values[f.key]);
+    });
   });
 
   document.addEventListener("click", function (e) {
@@ -1272,6 +1415,29 @@ section.block > h2 {
       showConfirmation(r.data);
     }).catch(function () {
       showError("could not reach the intake server");
+      btn.disabled = false;
+    });
+  });
+
+  document.getElementById("find-quotes-action").addEventListener("click", function () {
+    var btn = this;
+    var err = document.getElementById("find-quotes-error");
+    err.hidden = true;
+    btn.disabled = true;
+
+    fetch("/api/run/start", { method: "POST" }).then(function (res) {
+      return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+    }).then(function (r) {
+      if (!r.ok) {
+        err.textContent = r.data.error || "could not start a run";
+        err.hidden = false;
+        btn.disabled = false;
+        return;
+      }
+      window.location.href = "/run";
+    }).catch(function () {
+      err.textContent = "could not reach the server";
+      err.hidden = false;
       btn.disabled = false;
     });
   });

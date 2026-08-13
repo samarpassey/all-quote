@@ -84,6 +84,13 @@ __THEME_CSS__
 .run-action:hover { text-decoration: underline; }
 .run-action:disabled { color: var(--text-muted); cursor: default; text-decoration: none; }
 .run-progress { font-size: 12px; color: var(--text-label); }
+.run-finished-cta { margin: 0 0 32px 0; }
+.run-finished-cta a {
+  display: inline-block; font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+  color: var(--text-primary); text-decoration: none;
+  border-bottom: 1px solid var(--border-strong); padding-bottom: 2px;
+}
+.run-finished-cta a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -100,6 +107,10 @@ __THEME_CSS__
   <div class="run-controls">
     <button type="button" class="run-action" id="start-btn">Start run &rarr;</button>
     <div class="run-progress" id="run-progress"></div>
+  </div>
+
+  <div class="run-finished-cta" id="run-finished-cta" hidden>
+    <a href="/results">Run finished — View results &rarr;</a>
   </div>
 
   <section class="block">
@@ -144,6 +155,7 @@ __THEME_CSS__
     document.getElementById("run-progress").textContent =
       "run " + data.run_id + " — " + data.resolved + " of " + data.total + " resolved" +
       (data.finished ? " — finished" : " — in progress");
+    document.getElementById("run-finished-cta").hidden = !data.finished;
 
     var body = document.getElementById("routes-body");
     body.innerHTML = "";

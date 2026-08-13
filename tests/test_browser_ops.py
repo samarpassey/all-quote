@@ -273,6 +273,160 @@ def test_fill_public_refuses_street_name_field_suggesting_street_name_not_legal_
     _run(body())
 
 
+def test_fill_sensitive_reformats_iso_date_when_placeholder_hints_format(fixture_server, tmp_path):
+    # CAA's driver-details DOB field is a masked text input wanting
+    # MM/DD/YYYY; the vault stores ISO (build_vaulted_profile's DOB is
+    # "1990-01-15"). fill_sensitive must type the reformatted value, and
+    # sensitive_data must hold that SAME reformatted string -- not the raw
+    # ISO one -- or browser-use's own substring-based message filtering
+    # would never learn to redact what's actually on the page.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, plaintext = build_vaulted_profile(vault_path, "test-key")
+        sensitive_data: dict[str, str] = {}
+        tools = browser_ops.build_tools(profile, sensitive_data, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("masked_date_fields.html"))
+            index = await _index_for(session, id_attr="dob_masked")
+
+            await tools.registry.execute_action(
+                "fill_sensitive",
+                {"field_name": "date_of_birth", "element_index": index},
+                browser_session=session,
+            )
+
+            assert plaintext["date_of_birth"] == "1990-01-15"
+            actual_value = await page.evaluate("() => document.getElementById('dob_masked').value")
+            assert actual_value == "01/15/1990"
+            assert sensitive_data["date_of_birth"] == "01/15/1990"
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_fill_sensitive_leaves_iso_date_unchanged_with_no_format_hint(fixture_server, tmp_path):
+    # Fail-closed: no placeholder/pattern/aria-label hint on the target field
+    # -> the ISO value is typed as-is, never guessed at from its own shape.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, plaintext = build_vaulted_profile(vault_path, "test-key")
+        sensitive_data: dict[str, str] = {}
+        tools = browser_ops.build_tools(profile, sensitive_data, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("masked_date_fields.html"))
+            index = await _index_for(session, id_attr="dob_plain")
+
+            await tools.registry.execute_action(
+                "fill_sensitive",
+                {"field_name": "date_of_birth", "element_index": index},
+                browser_session=session,
+            )
+
+            actual_value = await page.evaluate("() => document.getElementById('dob_plain').value")
+            assert actual_value == plaintext["date_of_birth"] == "1990-01-15"
+            assert sensitive_data["date_of_birth"] == "1990-01-15"
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_fill_public_reformats_iso_date_when_placeholder_hints_format(fixture_server, tmp_path):
+    # Same rule applies via fill_public -- covers profile facts like
+    # licence.g1_date, which are public (not vault-backed) but still ISO.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        tools = browser_ops.build_tools(profile, {}, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("masked_date_fields.html"))
+            index = await _index_for(session, id_attr="issue_date_masked")
+
+            await tools.registry.execute_action(
+                "fill_public",
+                {"value": "2024-07-22", "element_index": index},
+                browser_session=session,
+            )
+
+            actual_value = await page.evaluate("() => document.getElementById('issue_date_masked').value")
+            assert actual_value == "07/22/2024"
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+# --- select_choice ------------------------------------------------------------
+
+
+def test_select_choice_clicks_the_tile_at_the_given_index(fixture_server, tmp_path):
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        tools = browser_ops.build_tools(profile, {}, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("tile_choice_fields.html"))
+            index = await _index_for(session, id_attr="tile_option_b")
+
+            result = await tools.registry.execute_action(
+                "select_choice",
+                {"label": "Learners", "element_index": index},
+                browser_session=session,
+            )
+
+            actual = await page.evaluate("() => document.getElementById('tile_result').value")
+            assert actual == "B"
+            assert "Learners" in (result.extracted_content or "")
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
+def test_select_choice_refuses_identity_shaped_tile(fixture_server, tmp_path):
+    # Same guard as fill_public: a choice tile is still a control the model
+    # picks, and must not become a bypass around the vault.
+    async def body():
+        vault_path = tmp_path / "vault.enc"
+        profile, _ = build_vaulted_profile(vault_path, "test-key")
+        tools = browser_ops.build_tools(profile, {}, vault_path=vault_path, vault_key="test-key")
+
+        session = await _new_session()
+        try:
+            page = await session.must_get_current_page()
+            await page.goto(fixture_server.url_for("tile_choice_fields.html"))
+            index = await _index_for(session, id_attr="tile_identity")
+
+            with pytest.raises(RuntimeError, match="identity field"):
+                await tools.registry.execute_action(
+                    "select_choice",
+                    {"label": "Use saved licence", "element_index": index},
+                    browser_session=session,
+                )
+
+            # refused before clicking anything -- the onclick handler must
+            # never have fired.
+            actual = await page.evaluate("() => document.getElementById('tile_identity_result').value")
+            assert actual == ""
+        finally:
+            await session.stop()
+
+    _run(body())
+
+
 def test_halt_never_maps_to_a_status_and_carries_reason():
     result = _run(browser_ops.halt("captcha_or_bot_check", "looks like a captcha"))
     assert result.is_done is True

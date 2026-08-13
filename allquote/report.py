@@ -30,6 +30,11 @@ class MergedRun:
     primary_registry_id: dict[str, str]  # distinct_rate_source_id -> primary registry_id
     payloads: dict[str, dict]  # distinct_rate_source_id -> raw result-or-not_attempted json
     notes: tuple[str, ...]  # run-level notes collected from every merged manifest, in order
+    # distinct_rate_source_id -> run_id whose payload is currently in effect
+    # for it (the run that "won" the supersession for that one route) — lets
+    # a caller answer "how many routes did a later, partial run actually
+    # override" without re-deriving the whole merge itself.
+    source_run_id: dict[str, str]
 
 
 def merge_runs(*, runs_root: Path = results_store.RUNS_ROOT) -> MergedRun:
@@ -49,6 +54,7 @@ def merge_runs(*, runs_root: Path = results_store.RUNS_ROOT) -> MergedRun:
     run_ids = results_store.list_run_ids(runs_root=runs_root)
     primary_registry_id: dict[str, str] = {}
     payloads: dict[str, dict] = {}
+    source_run_id: dict[str, str] = {}
     notes: list[str] = []
     for run_id in run_ids:
         manifest = results_store.load_manifest(run_id, runs_root=runs_root)
@@ -63,11 +69,13 @@ def merge_runs(*, runs_root: Path = results_store.RUNS_ROOT) -> MergedRun:
             if is_not_attempted and existing_is_real:
                 continue
             payloads[distinct_id] = payload
+            source_run_id[distinct_id] = run_id
     return MergedRun(
         run_ids=tuple(run_ids),
         primary_registry_id=primary_registry_id,
         payloads=payloads,
         notes=tuple(notes),
+        source_run_id=source_run_id,
     )
 
 

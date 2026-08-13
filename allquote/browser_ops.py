@@ -67,12 +67,13 @@ import json
 import os
 import re
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from browser_use import BrowserSession, Tools
 from browser_use.agent.views import ActionResult
-from browser_use.browser.events import TypeTextEvent
+from browser_use.browser.events import ClickElementEvent, TypeTextEvent
 
 from allquote import gates, vault
 from allquote.redact import SHAPE_PATTERNS, iter_profile_refs, redact_image, redact_text
@@ -97,15 +98,38 @@ def _split_street(value: str) -> tuple[str, str]:
     return match.group(1), match.group(2)
 
 
-# field_name -> (real IntakeAddress field it's derived from, splitter).
-# NOT a new vault entry and NOT added to vault.SENSITIVE_FIELD_NAMES (that
-# set is strictly schemas.py-derived, the single source of truth for what's
-# actually vaulted) -- these are resolve-time-only aliases for sites that
-# split a single stored field into more than one form field. CAA's driver
-# details step does this for street address.
+def _split_legal_name(value: str) -> tuple[str, str]:
+    """Splits a real, already-resolved full legal name into (first_name,
+    last_name) for sites that ask for them as two separate fields instead of
+    one (CAA's driver-details step does this). Only ever runs on the real
+    vaulted value. The first whitespace-separated token is the first name;
+    everything after it is the last name -- this keeps a multi-word last
+    name intact as one field, the common case for a First/Last split, and
+    never invents a division that isn't already present in the name itself.
+    Raises if the name has no internal whitespace to split on: a single-
+    token name cannot be divided into first/last without guessing where the
+    split falls, and a wrong guess would submit a fabricated name to a live
+    insurer -- fail closed, surface it, never silently invent a split."""
+    parts = value.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        raise ValueError(
+            "legal_name has no internal whitespace to split into first_name/last_name -- "
+            "cannot derive a first_name/last_name split without guessing where the name divides"
+        )
+    return parts[0], parts[1]
+
+
+# field_name -> (real IntakeAddress/IntakeIdentity field it's derived from,
+# splitter). NOT a new vault entry and NOT added to vault.SENSITIVE_FIELD_NAMES
+# (that set is strictly schemas.py-derived, the single source of truth for
+# what's actually vaulted) -- these are resolve-time-only aliases for sites
+# that split a single stored field into more than one form field. CAA's
+# driver details step does this for both street address and legal name.
 _DERIVED_SENSITIVE_FIELDS: dict[str, tuple[str, Callable[[str], str]]] = {
     "street_number": ("street", lambda v: _split_street(v)[0]),
     "street_name": ("street", lambda v: _split_street(v)[1]),
+    "first_name": ("legal_name", lambda v: _split_legal_name(v)[0]),
+    "last_name": ("legal_name", lambda v: _split_legal_name(v)[1]),
 }
 
 
@@ -122,6 +146,64 @@ def _resolve_sensitive_value(
             value = vault.resolve(ref, vault_path=vault_path, vault_key=vault_key)
             return transform(value) if transform else value
     raise KeyError(f"no vault-backed value for field_name {field_name!r} on this profile")
+
+
+# --- date reformatting for masked date inputs -------------------------------
+#
+# IntakeProfile dates (date_of_birth, g1_date, etc.) are always ISO 8601
+# (YYYY-MM-DD) — from a native HTML date input at intake, or vault.resolve()'s
+# str(date) fallback. A live insurer site's own date field is frequently a
+# plain masked text input expecting a different format (CAA's driver-details
+# step wants MM/DD/YYYY, confirmed live: "Please enter a valid date of birth
+# (e.g. MM/DD/YYYY)" on an untouched-looking field). Reformatting is driven
+# ONLY by a format token found in the target element's own placeholder/
+# pattern/aria-label/title — NEVER inferred from the value's own shape beyond
+# confirming it IS an ISO date. No hint found -> type the ISO value unchanged
+# (fail closed): a wrong guess would silently submit an incorrect date to a
+# live insurer, which is worse than a validation error asking us to look
+# again.
+
+_ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+_DATE_FORMAT_HINTS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bMM/DD/YYYY\b", re.IGNORECASE), "%m/%d/%Y"),
+    (re.compile(r"\bDD/MM/YYYY\b", re.IGNORECASE), "%d/%m/%Y"),
+    (re.compile(r"\bMM-DD-YYYY\b", re.IGNORECASE), "%m-%d-%Y"),
+    (re.compile(r"\bDD-MM-YYYY\b", re.IGNORECASE), "%d-%m-%Y"),
+    (re.compile(r"\bYYYY/MM/DD\b", re.IGNORECASE), "%Y/%m/%d"),
+]
+
+
+def _detect_date_format_hint(node: Any) -> str | None:
+    """A strftime format string read from the target element's OWN declared
+    format, or None if no recognized hint is present. Never looks at the
+    value being typed — only at the field itself."""
+    attributes = getattr(node, "attributes", None) or {}
+    parts = [attributes.get(key) for key in ("placeholder", "pattern", "aria-label", "title")]
+    ax_node = getattr(node, "ax_node", None)
+    ax_name = getattr(ax_node, "name", None) if ax_node is not None else None
+    parts.append(ax_name)
+    haystack = " ".join(p for p in parts if p)
+    for pattern, strftime_fmt in _DATE_FORMAT_HINTS:
+        if pattern.search(haystack):
+            return strftime_fmt
+    return None
+
+
+def _maybe_reformat_iso_date(value: str, node: Any) -> str:
+    """Reformats an ISO 8601 date to match a format hint declared on `node`
+    (see `_detect_date_format_hint`). Returns `value` unchanged if it isn't
+    an ISO date, if no hint is found, or if the ISO string doesn't parse —
+    fail closed in every ambiguous case."""
+    if not _ISO_DATE_PATTERN.match(value):
+        return value
+    strftime_fmt = _detect_date_format_hint(node)
+    if strftime_fmt is None:
+        return value
+    try:
+        return date.fromisoformat(value).strftime(strftime_fmt)
+    except ValueError:
+        return value
 
 
 async def _mask_input_css(browser_session: BrowserSession, element_index: int) -> None:
@@ -172,7 +254,12 @@ async def _mask_input_css(browser_session: BrowserSession, element_index: int) -
 # field_name="street" -- the FULL combined address -- for what is actually a
 # number-only or name-only input) and before the generic "legal_name" rule
 # (which would otherwise also match the bare word "name" inside "Street
-# Name" and wrongly suggest typing the person's own name into it).
+# Name" and wrongly suggest typing the person's own name into it). Same
+# reasoning for "First name"/"Last name": they must be caught by their own
+# rule BEFORE the generic "legal_name" rule, which would otherwise suggest
+# fill_sensitive(field_name="legal_name") -- the FULL combined name -- for
+# what is actually a first-only or last-only input (the live CAA bug this
+# fixes: the model injected the whole legal name into the first-name box).
 _IDENTITY_SIGNAL_RULES: list[tuple[str, re.Pattern[str]]] = [
     (
         "street_number",
@@ -184,6 +271,8 @@ _IDENTITY_SIGNAL_RULES: list[tuple[str, re.Pattern[str]]] = [
     ),
     ("street_name", re.compile(r"\b(street|address)\b.*\bname\b|\bname\b.*\b(street|address)\b")),
     ("street", re.compile(r"\b(address|street)\b")),
+    ("first_name", re.compile(r"\b(first|given)\s*name\b")),
+    ("last_name", re.compile(r"\b(last|sur|family)\s*name\b")),
     ("legal_name", re.compile(r"\b(first|last|full|legal|given|middle|sur|user)?\s*name\b")),
     ("licence_number", re.compile(r"\blicen[cs]e\b")),
     ("date_of_birth", re.compile(r"\b(dob|birth\s*date|date\s*of\s*birth)\b")),
@@ -269,6 +358,26 @@ async def _type_into_index(
     )
 
 
+async def _click_index(browser_session: BrowserSession, element_index: int, label: str) -> ActionResult:
+    """Reuses browser-use's own CDP-click primitive (the same event its
+    built-in click_element_by_index action dispatches — tools/service.py) for
+    a discrete choice control (tile/card/button) that fill_public/
+    fill_sensitive's typing-based approach cannot operate.
+    """
+    node = await browser_session.get_element_by_index(element_index)
+    if node is None:
+        return ActionResult(
+            error=f"Element index {element_index} not available - page may have changed."
+        )
+    event = browser_session.event_bus.dispatch(ClickElementEvent(node=node))
+    await event
+    await event.event_result(raise_if_any=True, raise_if_none=False)
+    return ActionResult(
+        extracted_content=f"selected choice {label!r} at index {element_index}",
+        include_in_memory=False,
+    )
+
+
 async def halt(gate_kind: str, reason: str) -> ActionResult:
     """LLM-invoked voluntary halt. Module-level (not a build_tools closure)
     since it needs neither `profile` nor `sensitive_data` — directly callable
@@ -310,8 +419,9 @@ def build_tools(
         "Fill a sensitive field (licence number, DOB, VIN, address, etc.) into the "
         "element at the given index. Pass only the field NAME — never the value, "
         "which you never see. If the site splits street address into two fields, "
-        "use street_number and street_name instead of street. Raises if field_name "
-        "is not a recognized sensitive field."
+        "use street_number and street_name instead of street. If it splits legal "
+        "name into two fields, use first_name and last_name instead of legal_name. "
+        "Raises if field_name is not a recognized sensitive field."
     )
     async def fill_sensitive(field_name: str, element_index: int, browser_session: BrowserSession) -> ActionResult:
         if field_name not in vault.SENSITIVE_FIELD_NAMES and field_name not in _DERIVED_SENSITIVE_FIELDS:
@@ -321,6 +431,15 @@ def build_tools(
                 f"for a site that splits street address into two fields)"
             )
         value = _resolve_sensitive_value(profile, field_name, vault_path=vault_path, vault_key=vault_key)
+        # Reformat BEFORE sensitive_data is populated: sensitive_data must
+        # hold exactly what ends up typed on the page, or browser-use's own
+        # substring-based message filtering (module docstring point 1) would
+        # filter for the ISO string while the page — and any subsequent
+        # vision/DOM read — shows the reformatted one, leaking a sensitive
+        # date in a format the filter never learned to redact.
+        node = await browser_session.get_dom_element_by_index(element_index)
+        if node is not None:
+            value = _maybe_reformat_iso_date(value, node)
         sensitive_data[field_name] = value
         await _mask_input_css(browser_session, element_index)
         return await _type_into_index(
@@ -343,9 +462,32 @@ def build_tools(
                     f"fill_public refuses identity-shaped fields. Use "
                     f"fill_sensitive(field_name={matched!r}, element_index={element_index}) instead."
                 )
+            value = _maybe_reformat_iso_date(value, node)
         return await _type_into_index(
             browser_session, element_index, value, is_sensitive=False, sensitive_key_name=None
         )
+
+    @tools.action(
+        "Click a discrete choice control — a tile, card, or button representing one "
+        "option in a single-select group — at the given index. Use this instead of "
+        "fill_public/fill_sensitive for a field presented as clickable options rather "
+        "than a text box or native dropdown (e.g. licence-type tiles). Pass the label "
+        "of the option you are selecting, matching a profile fact above — never a "
+        "fabricated value. Refuses identity-shaped fields (name, licence, DOB, "
+        "address, phone, email, VIN) — use fill_sensitive for those instead."
+    )
+    async def select_choice(label: str, element_index: int, browser_session: BrowserSession) -> ActionResult:
+        node = await browser_session.get_dom_element_by_index(element_index)
+        if node is not None:
+            matched = _matched_identity_field(node)
+            if matched is not None:
+                raise ValueError(
+                    f"element index {element_index} looks like an identity field "
+                    f"({matched}, based on its name/label/autocomplete attribute) — "
+                    f"select_choice refuses identity-shaped fields. Use "
+                    f"fill_sensitive(field_name={matched!r}, element_index={element_index}) instead."
+                )
+        return await _click_index(browser_session, element_index, label)
 
     tools.action(
         "Stop the run immediately because this page requires something automation must "

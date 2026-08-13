@@ -53,13 +53,16 @@ def _get(httpd, path):
     return resp, body
 
 
-def test_root_redirects_to_results(tmp_path):
+def test_root_redirects_to_intake(tmp_path):
+    # Demo flow: prefilled form -> Find quotes -> run console -> results.
+    # / is the start of that flow, not the end -- it must land on intake,
+    # not results.
     _seed_registry(tmp_path / "allquote.db")
     httpd, thread = _start_app(tmp_path)
     try:
         resp, _ = _get(httpd, "/")
         assert resp.status == 302
-        assert resp.getheader("Location") == "/results"
+        assert resp.getheader("Location") == "/intake"
     finally:
         _stop(httpd, thread)
 
@@ -97,7 +100,7 @@ def test_intake_page_is_reused_not_rebuilt(tmp_path):
         resp, body = _get(httpd, "/intake")
         assert resp.status == 200
         assert b"Driver profile intake" in body
-        assert body == intake.render_html().encode("utf-8")
+        assert body == intake.render_html(profile_path=tmp_path / "profile.json").encode("utf-8")
     finally:
         _stop(httpd, thread)
 

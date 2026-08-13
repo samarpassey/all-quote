@@ -94,6 +94,46 @@ def build_rows(
     return rows
 
 
+# A later run only reads as a deliberate, callout-worthy "supersession" of
+# specific routes when it's a small, targeted re-run — not when it's just
+# another near-full batch that happens to land after the canonical one (that
+# case is silent, ordinary chronological progression: e.g. d3116d landed
+# 68/79 routes after canonical with the IDENTICAL status on every overlapping
+# route — a re-verification, not a change worth flagging). "Small" is
+# relative to the canonical run's own landed count, not an absolute number,
+# so this keeps working if the registry's size changes.
+_PARTIAL_RUN_FRACTION = 0.5
+
+
+def _landed_counts(run_ids: tuple[str, ...], *, runs_root: Path) -> dict[str, int]:
+    return {
+        run_id: sum(1 for payload in report.results_store.list_results(run_id, runs_root=runs_root) if "quote_result" in payload)
+        for run_id in run_ids
+    }
+
+
+def _canonical_run_id(landed_counts: dict[str, int], run_ids: tuple[str, ...]) -> str | None:
+    """The run treated as "the" full batch a partial re-run supersedes part
+    of: the run with the most actually-landed results (not just planned
+    manifest routes — a killed/interrupted batch can list 79 planned routes
+    while only having written 68). Ties (two equally-complete full runs) are
+    broken by most recent, on the assumption that a later full re-run of the
+    same universe reflects a fix, not a regression — this is a heuristic,
+    not a semantic judgment of which run is "better"; it matches every run
+    on disk as of this writing (see docs/RUN_REPORT.md) but a future run
+    that completes fully yet is worse than an earlier one would still win.
+    None only when no run exists yet."""
+    if not run_ids:
+        return None
+    best_id: str | None = None
+    best_landed = -1
+    for run_id in run_ids:  # oldest first -> a later tie overwrites an earlier one
+        landed = landed_counts.get(run_id, 0)
+        if landed >= best_landed:
+            best_id, best_landed = run_id, landed
+    return best_id
+
+
 def build_results_payload(
     *, db_path: Path = registry.DB_PATH, runs_root: Path = report.results_store.RUNS_ROOT
 ) -> dict:
@@ -104,8 +144,22 @@ def build_results_payload(
     coverage_report = report.compute_report(db_path=db_path, runs_root=runs_root)
     rows = build_rows(snapshot, planned, merged)
 
+    landed_counts = _landed_counts(merged.run_ids, runs_root=runs_root)
+    canonical_run_id = _canonical_run_id(landed_counts, merged.run_ids)
+    canonical_landed = landed_counts.get(canonical_run_id, 0) if canonical_run_id else 0
+    partial_run_ids = {
+        run_id
+        for run_id, landed in landed_counts.items()
+        if run_id != canonical_run_id and canonical_landed and landed < canonical_landed * _PARTIAL_RUN_FRACTION
+    }
+    superseded_route_count = sum(
+        1 for distinct_id, run_id in merged.source_run_id.items() if run_id in partial_run_ids
+    )
+
     return {
         "generated_from_runs": list(coverage_report.run_ids),
+        "canonical_run_id": canonical_run_id,
+        "superseded_route_count": superseded_route_count,
         "rows": rows,
         "metrics": {
             "registry_total_rows": coverage_report.registry_total_rows,
@@ -163,13 +217,14 @@ __THEME_CSS__
         <thead>
           <tr>
             <th></th>
+            <th>Status</th>
             <th>Brand</th>
             <th>Legal underwriter</th>
             <th>Group</th>
             <th>Distribution</th>
             <th>Provenance</th>
             <th>Verified</th>
-            <th class="sortable" id="th-premium">Annual premium</th>
+            <th class="sortable" id="th-premium"><span class="th-main">Annual premium</span><span class="th-note">no priced quote is reachable for this profile — see run report.</span></th>
           </tr>
         </thead>
         <tbody id="rows-body"></tbody>
@@ -216,9 +271,20 @@ __THEME_CSS__
   function isVerifiedInWindow(ts) { return !!ts && ts >= HACKATHON_START && ts <= HACKATHON_END; }
   function money(x) { return x === null || x === undefined ? "—" : "$" + Math.round(x).toLocaleString(); }
 
-  document.getElementById("masthead-meta").textContent =
-    "runs merged: " + (DATA.generated_from_runs.join(", ") || "none yet") +
-    " · " + DATA.unresolved_count + " of " + ROWS.length + " unresolved · personal use only, not insurance advice";
+  (function renderMastheadMeta() {
+    var runLabel;
+    if (!DATA.canonical_run_id) {
+      runLabel = "no run yet";
+    } else if (DATA.superseded_route_count > 0) {
+      runLabel = "canonical run " + DATA.canonical_run_id + ", " + DATA.superseded_route_count +
+        " route" + (DATA.superseded_route_count === 1 ? "" : "s") + " superseded by later runs";
+    } else {
+      runLabel = "canonical run " + DATA.canonical_run_id;
+    }
+    document.getElementById("masthead-meta").textContent =
+      runLabel + " · " + DATA.unresolved_count + " of " + ROWS.length +
+      " unresolved · personal use only, not insurance advice";
+  })();
 
   // -- metrics strip --
   (function renderMetrics() {
@@ -279,7 +345,8 @@ __THEME_CSS__
   var sortDir = null; // null | "asc" | "desc"
   document.getElementById("th-premium").addEventListener("click", function () {
     sortDir = sortDir === null ? "asc" : sortDir === "asc" ? "desc" : null;
-    this.textContent = "Annual premium" + (sortDir === "asc" ? " ↑" : sortDir === "desc" ? " ↓" : "");
+    this.querySelector(".th-main").textContent =
+      "Annual premium" + (sortDir === "asc" ? " ↑" : sortDir === "desc" ? " ↓" : "");
     renderRows();
   });
 
@@ -356,6 +423,7 @@ __THEME_CSS__
       var tr = el(
         '<tr class="' + band + " " + state + ' row-clickable" tabindex="0" role="button">' +
         '<td><span class="' + glyphCls + '">' + STATUS_GLYPH[r.status] + "</span></td>" +
+        "<td>" + esc(STATUS_LABEL[r.status]) + "</td>" +
         "<td>" + esc(r.brand_or_program) + "</td>" +
         "<td>" + esc(r.legal_underwriter) + "</td>" +
         "<td>" + esc(r.insurer_group) + "</td>" +
@@ -374,7 +442,7 @@ __THEME_CSS__
       body.appendChild(tr);
 
       if (expanded === r.distinct_rate_source_id) {
-        body.appendChild(el('<tr class="drawer-row"><td colspan="8">' + drawerHtml(r) + "</td></tr>"));
+        body.appendChild(el('<tr class="drawer-row"><td colspan="9">' + drawerHtml(r) + "</td></tr>"));
       }
     });
   }

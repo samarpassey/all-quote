@@ -376,6 +376,7 @@ Broker, aggregator and branded-broker routes
 
 
 MGA, program and specialty discovery
+
 Do not assume that every MGA produces a separate standard auto rate. Start with Hagerty for collector
 vehicles, where the program is administered separately and underwritten by Aviva. Treat Agile, APRIL
 Canada, Burns & Wilcox, Cambrian Special Risks, Milnco and Special Risk as discovery leads from broker

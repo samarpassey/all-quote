@@ -388,9 +388,12 @@ def _public_field_facts(profile: IntakeProfile) -> list[tuple[str, str]]:
     return facts
 
 
-def _build_task_prompt(target_url: str, profile: IntakeProfile) -> str:
+def _build_task_prompt(
+    target_url: str, profile: IntakeProfile, *, extra_task_instructions: str | None = None
+) -> str:
     facts = _public_field_facts(profile)
     facts_block = "\n".join(f"  {name} = {value}" for name, value in facts) or "  (none on file)"
+    extra_block = f"\n\n{extra_task_instructions}" if extra_task_instructions else ""
     return (
         f"You are filling out an Ontario private-passenger auto insurance quote form "
         f"starting at {target_url}.\n\n"
@@ -404,11 +407,17 @@ def _build_task_prompt(target_url: str, profile: IntakeProfile) -> str:
         "matching fact above, leave it blank rather than fabricate one. fill_public will "
         "itself refuse identity-shaped fields (name, licence, date of birth, address, "
         "phone, email, VIN) even if you try — those always go through fill_sensitive.\n\n"
+        "If a field is presented as clickable tiles, cards, or buttons representing "
+        "discrete choices — not a text box or a native dropdown — use "
+        "select_choice(label, element_index) to click the option matching a profile "
+        "fact above, instead of trying to type into it.\n\n"
         "Use fill_sensitive(field_name, element_index) for sensitive fields — pass ONLY "
         "the field name (e.g. legal_name, licence_number, date_of_birth, vin, email, "
         "mobile, street, postal_code), never a value. If the site asks for street number "
         "and street name as two separate fields instead of one combined street field, use "
-        "street_number and street_name instead of street. You never see the real value; it "
+        "street_number and street_name instead of street. If it asks for first and last "
+        "name as two separate fields instead of one combined name field, use first_name "
+        "and last_name instead of legal_name. You never see the real value; it "
         "is injected automatically. Never fabricate a sensitive value yourself.\n\n"
         "If you encounter any of the following, call halt(gate_kind, reason) immediately "
         "and do not proceed past it: a request to log in or create an account; a CAPTCHA "
@@ -422,6 +431,7 @@ def _build_task_prompt(target_url: str, profile: IntakeProfile) -> str:
         "collision_deductible (number), comprehensive_deductible (number), "
         "effective_date (YYYY-MM-DD or null), quote_reference_id (string or null). "
         "Only call done once you can see an actual price on the page — never fabricate one."
+        f"{extra_block}"
     )
 
 
@@ -436,10 +446,11 @@ async def _default_agent_runner(
     max_steps: int,
     timeout_s: float,
     profile: IntakeProfile,
+    extra_task_instructions: str | None = None,
 ) -> AttemptOutcome:
     llm = ChatAnthropic(model=os.environ["EXECUTOR_MODEL"])
     agent = Agent(
-        task=_build_task_prompt(target_url, profile),
+        task=_build_task_prompt(target_url, profile, extra_task_instructions=extra_task_instructions),
         llm=llm,
         tools=tools,
         browser_session=browser_session,
@@ -494,6 +505,8 @@ async def _run_single_attempt(
     vault_key: str | None,
     agent_runner: Any,
     headless: bool = True,
+    max_attempts: int = 2,
+    extra_task_instructions: str | None = None,
 ) -> QuoteResult:
     """Runs one browser attempt end to end and returns a terminal
     QuoteResult, or raises `_RetryAttempt` if (and only if) this was attempt
@@ -565,6 +578,7 @@ async def _run_single_attempt(
                 max_steps=max_steps,
                 timeout_s=timeout_s,
                 profile=profile,
+                extra_task_instructions=extra_task_instructions,
             )
         except Exception as exc:
             # Not BaseException: KeyboardInterrupt/SystemExit must propagate,
@@ -635,7 +649,7 @@ async def _run_single_attempt(
             detail["exception_type"] = type(attempt_exception).__name__
             detail["exception_message"] = str(attempt_exception)
             detail["elapsed_seconds"] = elapsed
-            if (transient or early_timeout) and attempt_number == 1:
+            if (transient or early_timeout) and attempt_number < max_attempts:
                 # Every attempt writes its own evidence, including one that
                 # gets retried — the retry never overwrites this artifact.
                 await write_evidence({**detail, "retrying": True})
@@ -749,8 +763,11 @@ async def run_route(
     *,
     live: bool = False,
     fixture_url: str | None = None,
+    live_url_override: str | None = None,
     max_steps: int | None = None,
     timeout_s: float | None = None,
+    max_attempts: int = 2,
+    extra_task_instructions: str | None = None,
     headless: bool = True,
     vault_path: Path = vault.VAULT_PATH,
     vault_key: str | None = None,
@@ -758,6 +775,15 @@ async def run_route(
     evidence_root: Path = EVIDENCE_ROOT,
     agent_runner: Any = _default_agent_runner,
 ) -> QuoteResult:
+    """`live_url_override` starts a live run at a specific quote-flow URL
+    instead of the registry row's `quote_url` (typically its marketing
+    homepage) — the route is still looked up by `market_id` for every other
+    purpose (evidence, dedupe, status write-back). `max_attempts` defaults to
+    2 (the standing bounded-attempt policy: 1 attempt + 1 retry on transient
+    technical error only, per CLAUDE.md); pass 1 to disable the retry for a
+    diagnostic run where re-attempting would just re-burn the same budget on
+    the same wall, not recover from a transient blip.
+    """
     max_steps = max_steps if max_steps is not None else _default_max_steps()
     timeout_s = timeout_s if timeout_s is not None else _default_timeout_s()
 
@@ -789,7 +815,7 @@ async def run_route(
         )
 
     if live:
-        target_url = record.quote_url
+        target_url = live_url_override or record.quote_url
     else:
         if fixture_url is None:
             raise ValueError("fixture mode requires fixture_url")
@@ -798,7 +824,7 @@ async def run_route(
     _write_run_start_evidence(record, run_id, profile, evidence_root=evidence_root)
 
     last_exception: BaseException | None = None
-    for attempt_number in (1, 2):
+    for attempt_number in range(1, max_attempts + 1):
         try:
             return await _run_single_attempt(
                 record=record,
@@ -813,17 +839,19 @@ async def run_route(
                 vault_key=vault_key,
                 agent_runner=agent_runner,
                 headless=headless,
+                max_attempts=max_attempts,
+                extra_task_instructions=extra_task_instructions,
             )
         except _RetryAttempt as retry:
             last_exception = retry.exc
             continue
 
-    # Both attempts exhausted transiently.
+    # All attempts exhausted transiently.
     evidence = await _write_attempt_evidence(
         record=record,
         profile=profile,
         run_id=run_id,
-        attempt_number=2,
+        attempt_number=max_attempts,
         browser_session=None,
         sensitive_data={},
         target_url=target_url,
@@ -836,7 +864,7 @@ async def run_route(
         record,
         status=Status.UNREACHABLE,
         is_exact_quote=False,
-        failure_reason=f"unreachable after 2 attempts: {last_exception}",
+        failure_reason=f"unreachable after {max_attempts} attempt(s): {last_exception}",
         next_action="retry later",
         evidence=evidence,
         confidence="low",

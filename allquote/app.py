@@ -90,8 +90,11 @@ class _AppHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if path == "/":
+            # The demo flow starts at intake (prefilled form -> Find quotes ->
+            # run console -> results), not at results, which is the END of
+            # that flow -- landing there first reads as arriving mid-story.
             self.send_response(302)
-            self.send_header("Location", "/results")
+            self.send_header("Location", "/intake")
             self.end_headers()
             return
         if path == "/results":
@@ -103,7 +106,7 @@ class _AppHandler(BaseHTTPRequestHandler):
             self._send_html(200, run_console_view.render_run_console_html(latest_run_id=latest))
             return
         if path in ("/intake", "/intake.html"):
-            self._send_html(200, intake.render_html())
+            self._send_html(200, intake.render_html(profile_path=self.profile_path))
             return
         if path == "/api/run/status":
             self._handle_run_status(parse_qs(parsed.query))
@@ -168,8 +171,12 @@ class _AppHandler(BaseHTTPRequestHandler):
             del body
 
         try:
+            existing_profile = intake.load_profile(path=self.profile_path)
             profile, vaulted = intake.build_profile_from_submission(
-                payload, vault_path=self.vault_path, vault_key=self.vault_key
+                payload,
+                vault_path=self.vault_path,
+                vault_key=self.vault_key,
+                existing_profile=existing_profile,
             )
         except (ValidationError, ValueError, KeyError):
             self._send_json(400, {"error": "profile validation failed — check required fields"})

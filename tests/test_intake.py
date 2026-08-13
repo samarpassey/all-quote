@@ -7,7 +7,7 @@ import urllib.request
 
 from http.server import ThreadingHTTPServer
 
-from allquote import intake
+from allquote import intake, vault
 
 _VALID_PAYLOAD = {
     "identity": {
@@ -69,7 +69,7 @@ def test_generated_html_has_five_open_and_four_toggled_sections(tmp_path):
     # allquote/intake.py's _TEMPLATE), so assert against that embedded JSON
     # rather than counting DOM strings that only exist once a browser runs
     # the renderer.
-    out = intake.generate(output_path=tmp_path / "intake.html")
+    out = intake.generate(output_path=tmp_path / "intake.html", profile_path=tmp_path / "profile.json")
     html = out.read_text()
     for n in [f"{i:02d}" for i in range(1, 10)]:
         assert n in html
@@ -85,7 +85,7 @@ def test_generated_html_has_five_open_and_four_toggled_sections(tmp_path):
 
 
 def test_generated_html_has_all_13_optional_ab_benefit_rows(tmp_path):
-    out = intake.generate(output_path=tmp_path / "intake.html")
+    out = intake.generate(output_path=tmp_path / "intake.html", profile_path=tmp_path / "profile.json")
     html = out.read_text()
 
     assert len(intake.OPTIONAL_AB_BENEFITS) == 13
@@ -192,8 +192,97 @@ def test_optional_free_text_fields_accept_blank_and_store_none(tmp_path):
     assert profile.contact.preferred_callback_window is None
 
 
+def _prefill_from_html(html: str) -> dict:
+    marker = 'id="allquote-prefill" type="application/json">'
+    start = html.index(marker) + len(marker)
+    end = html.index("</script>", start)
+    return json.loads(html[start:end])
+
+
+def test_render_html_with_no_saved_profile_has_empty_prefill(tmp_path):
+    html = intake.render_html(profile_path=tmp_path / "no-such-profile.json")
+    assert _prefill_from_html(html) == {}
+
+
+def test_render_html_prefills_non_sensitive_fields_and_never_leaks_sensitive_values(tmp_path):
+    vault_path = tmp_path / "vault.enc"
+    profile, _ = intake.build_profile_from_submission(
+        _VALID_PAYLOAD, vault_path=vault_path, vault_key="test-key-not-real-intake-0011"
+    )
+    profile_path = tmp_path / "profile.json"
+    intake.save_profile(profile, path=profile_path)
+
+    html = intake.render_html(profile_path=profile_path)
+
+    for plaintext in (
+        "Fake Testperson", "T1234-56789-01234", "FAKEVEH0000000001", "123 Fake Test Street",
+    ):
+        assert plaintext not in html
+    for ref in (
+        profile.identity.legal_name, profile.identity.date_of_birth,
+        profile.licence.licence_number, profile.vehicle.vin,
+        profile.address.street, profile.address.postal_code,
+    ):
+        assert str(ref) not in html
+
+    prefill = _prefill_from_html(html)
+
+    assert prefill["identity"]["stored"] == ["legal_name", "date_of_birth"]
+    assert "legal_name" not in prefill["identity"]["values"]
+    assert prefill["identity"]["values"]["gender"] == "prefer_not_to_say"
+
+    assert prefill["licence"]["stored"] == ["licence_number"]
+    assert "licence_number" not in prefill["licence"]["values"]
+    assert prefill["licence"]["values"]["class"] == "G"
+
+    assert prefill["vehicle"]["stored"] == ["vin"]
+    assert prefill["vehicle"]["values"]["make"] == "Testmake"
+
+    assert sorted(prefill["address"]["stored"]) == ["postal_code", "street"]
+    assert prefill["address"]["values"]["city"] == "Testville"
+
+    # optional groups never submitted have no entry at all
+    assert "contact" not in prefill
+    assert "history" not in prefill
+
+
+def test_resubmission_with_blank_sensitive_field_preserves_existing_vaulted_value(tmp_path):
+    vault_path = tmp_path / "vault.enc"
+    vault_key = "test-key-not-real-intake-0012"
+    profile1, vaulted1 = intake.build_profile_from_submission(
+        _VALID_PAYLOAD, vault_path=vault_path, vault_key=vault_key
+    )
+    assert "legal_name" in vaulted1
+
+    payload2 = json.loads(json.dumps(_VALID_PAYLOAD))
+    payload2["identity"]["legal_name"] = ""  # left blank on re-submission, as the form does
+
+    profile2, vaulted2 = intake.build_profile_from_submission(
+        payload2, vault_path=vault_path, vault_key=vault_key, existing_profile=profile1
+    )
+    assert "legal_name" not in vaulted2  # nothing new was vaulted
+    assert profile2.identity.legal_name == profile1.identity.legal_name  # old ref carried forward
+    assert (
+        vault.resolve(profile2.identity.legal_name, vault_path=vault_path, vault_key=vault_key)
+        == "Fake Testperson"
+    )
+
+
+def test_resubmission_with_blank_field_and_no_prior_stored_value_stays_none(tmp_path):
+    payload = json.loads(json.dumps(_VALID_PAYLOAD))
+    del payload["vehicle"]["vin"]
+    profile, vaulted = intake.build_profile_from_submission(
+        payload,
+        vault_path=tmp_path / "vault.enc",
+        vault_key="test-key-not-real-intake-0013",
+        existing_profile=None,
+    )
+    assert profile.vehicle.vin is None
+    assert "vin" not in vaulted
+
+
 def _start_server(tmp_path, vault_key):
-    intake.generate(output_path=tmp_path / "intake.html")
+    intake.generate(output_path=tmp_path / "intake.html", profile_path=tmp_path / "profile.json")
     handler_cls = intake._handler_class(
         intake_html=(tmp_path / "intake.html").read_bytes(),
         vault_path=tmp_path / "vault.enc",

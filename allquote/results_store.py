@@ -9,6 +9,7 @@ so lineage across re-runs survives on disk.
 """
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -158,7 +159,18 @@ def list_run_ids(*, runs_root: Path = RUNS_ROOT) -> list[str]:
 
 
 def list_results(run_id: str, *, runs_root: Path = RUNS_ROOT) -> list[dict]:
+    """Skips (rather than raises on) a result file that fails to parse --
+    e.g. a 0-byte file left behind by a batch subprocess killed mid-write.
+    A single corrupt file from an interrupted run must never take down the
+    whole results view; the skip is logged to stderr so it's still visible,
+    not silently swallowed."""
     results_dir = run_dir(run_id, runs_root=runs_root) / "results"
     if not results_dir.exists():
         return []
-    return [json.loads(path.read_text()) for path in sorted(results_dir.glob("*.json"))]
+    results = []
+    for path in sorted(results_dir.glob("*.json")):
+        try:
+            results.append(json.loads(path.read_text()))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+            sys.stderr.write(f"results_store.list_results: skipping unparseable {path}: {exc}\n")
+    return results
