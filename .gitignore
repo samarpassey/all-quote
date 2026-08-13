@@ -13,3 +13,6 @@ __pycache__/
 *.db
 vault.enc
 .DS_Store
+
+.claude/
+docs/DESIGN.md.bak

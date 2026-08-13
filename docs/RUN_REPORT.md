@@ -1,21 +1,45 @@
 # Run report
 
 Canonical run: `20260812T000400Z-445a33`, merged with two superseded runs
-(`20260811T202744Z-79e3e8`, `20260811T205702Z-9cfc30` — see §6). Produced by
-`python -m allquote.report` / `allquote/results_view.py` against the current
-market registry (`data/allquote.db`, seeded from `data/seed_registry.json`)
-and everything on disk under `data/runs/`. Redacted per docs/GUARDRAILS.md;
-no real licence number, DOB, VIN, full address, or phone appears anywhere
-below — self-checked by grep, see the end of this document's companion note
-in the submission.
+(`20260811T202744Z-79e3e8`, `20260811T205702Z-9cfc30` — see §6) and one
+later targeted single-route re-run (`20260813T002253Z-46e0c6`, CAA Insurance
+only — see §1 and §6a) that supersedes the canonical run's result for that
+one distinct source. Produced by `python -m allquote.report` /
+`allquote/results_view.py` against the current market registry
+(`data/allquote.db`, seeded from `data/seed_registry.json`) and everything
+on disk under `data/runs/`. Redacted per docs/GUARDRAILS.md; no real licence
+number, DOB, VIN, full address, or phone appears anywhere below —
+self-checked by grep, see the end of this document's companion note in the
+submission.
 
 ## Executive summary
 
 **Headline finding.** This profile holds a G1 Ontario driver's licence,
 first licensed 2024-07-22. A G1 holder cannot be the principal driver on a
 standard Ontario private-passenger auto policy, so no standard Ontario
-market will price this risk. Every terminal status below follows from that
-one market fact — it is not a system failure. Full statement in §1.
+market will price this risk — that rule explains the market outcomes below:
+why `comparable_quote_yield` is 0%, and why the one route that reached a
+market-stated determination (CAA, below) declined. It does not explain
+every terminal status in this report. Site access controls (bot walls),
+our own guardrail halts, and our own automation limits are distinct
+causes, unrelated to licence class — each counted and broken out in §4.
+Full statement in §1.
+
+**Market confirmation, one route.** A later targeted re-run
+(`20260813T002253Z-46e0c6`, 2026-08-13) reached CAA Insurance
+(`route-caa-insurance`) further than any prior attempt: the agent filled in
+vehicle details, driver details, and selected licence class G1 — with zero
+validation errors — and CAA's own server declined to quote: *"we are unable
+to provide you with a quote at this time... find a local licensed CAA Agent
+or Broker."* CAA's page does not state a reason. The rest of the profile is
+unremarkable; G1 is the one atypical fact in it; G1-as-principal-driver is
+our strongest inference, consistent with Ontario's own graduated-licensing
+rule, but it is not something the market said. This converts the headline
+finding above from research-derived to **market-observed** for this one
+distinct source — the other 78 remain as reported below, unaffected. This
+result supersedes the canonical run's `unreachable` result for CAA
+specifically; see §2 and §6a for the evidence and why the earlier result no
+longer stands.
 
 **The five metrics.**
 
@@ -39,7 +63,7 @@ actually contacted (`provenance=observed`):**
 | Our own guardrail halts | 0 this run (2 reproduced in superseded runs) | Our safety policy stopping us, not the site — Square One's consent-declaration halt |
 | Site access controls (bot walls, account walls) | 3 `blocked` (2 confirmed, 1 lower-confidence) | belairdirect and InsuranceHotline are confirmed real walls; Allstate's evidence shows only its marketing homepage |
 | Market gates (consent, identity) | 4 (2 confirmed `manual_handoff`, 2 recognized but unconfirmed) | Sonnet and TD Insurance are deterministically confirmed; Co-operators and Desjardins were correctly refused by the agent but not independently confirmed by the detector |
-| Our own automation limits | 13 `unreachable` (10 pure automation limits, 3 suspected undetected bot walls) | The market did not stop these — the agent ran out of step budget or hit the batch hard-cap with no market-side signal; 3 more (Rates.ca, LowestRates.ca, Surex) show a possible wall the detector missed |
+| Our own automation limits | 12 `unreachable` (9 pure automation limits, 3 suspected undetected bot walls) | The market did not stop these — the agent ran out of step budget or hit the batch hard-cap with no market-side signal; 3 more (Rates.ca, LowestRates.ca, Surex) show a possible wall the detector missed. CAA Insurance was in this bucket in the canonical run; the later re-run gave it a real determination (`ineligible`, see above) and moved it out |
 
 Full breakdown, route-by-route, in §4.
 
@@ -63,16 +87,23 @@ licensing rules require a G2 or full G before an insurer will rate someone
 as the principal operator. No standard Ontario market will price this risk,
 full stop.**
 
-This is a market fact, not a system failure. Every terminal status in the
-coverage ledger below — every `manual_handoff`, every `blocked`, every
-`unreachable`, every `specialty_only`, every `unresolved` — is downstream of
-this one fact: there was never a standard-PPA quote to be had for this
-profile from any of the 79 distinct rate sources this run reached or
-reasoned about. `comparable_quote_yield` is 0% not because the agent failed
-to shop hard enough, but because the product this profile qualifies for
-does not exist in the standard market it was pointed at. Read the rest of
-this report — coverage, barriers, gaps — against that fact, not in spite of
-it.
+This is a market fact, and it explains the market-side outcomes: there was
+never a standard-PPA quote to be had for this profile from any of the 79
+distinct rate sources this run reached or reasoned about.
+`comparable_quote_yield` is 0% not because the agent failed to shop hard
+enough, but because the product this profile qualifies for does not exist
+in the standard market it was pointed at — and, market-observed for one
+route, it is the strongest available explanation for CAA's decline (§6a).
+
+It does not explain every terminal status in the coverage ledger below, and
+this report does not claim it does. `blocked` is a site's own access
+control (a bot wall), not a licensing rule. A share of `manual_handoff` and
+`unreachable` are this system's own guardrail halts and automation
+limits — our failure to complete or safely continue a journey, not the
+market declining to write. §4 breaks out, by count, which routes stopped
+for which of these distinct reasons. Read the rest of this report —
+coverage, barriers, gaps — against both: the one market fact above, and the
+separate, counted reasons behind every status that isn't downstream of it.
 
 ## 2. Coverage ledger
 
@@ -85,8 +116,10 @@ evidence artifact this run's outcome is backed by. Sorted by status in
 docs/SCHEMAS.md's canonical order, then alphabetically by brand.
 
 No row below carries `quoted_comparable`, `quoted_non_comparable`,
-`estimate_only`, `callback_required`, `ineligible`, `duplicate_rate_source`,
-or `not_currently_writing` this run — see §1.
+`estimate_only`, `callback_required`, `duplicate_rate_source`, or
+`not_currently_writing` this run — see §1. One row carries `ineligible`:
+CAA Insurance, sourced to the later single-route re-run rather than the
+canonical run — see the note under its row and §6a.
 
 | Registry ID | Brand / program | Legal underwriter | Distribution | Status | Provenance | Verified (UTC) | Evidence timestamp (UTC) | Evidence source | Hash (12) |
 |---|---|---|---|---|---|---|---|---|---|
@@ -112,6 +145,7 @@ or `not_currently_writing` this run — see §1.
 | `panel-lowestrates-travelers` | Travelers (via LowestRates.ca panel) | The Dominion of Canada General Insurance Company | aggregator | manual_handoff | derived | — | 2026-08-12T00:04:00.255137Z | Brief §3 (practical route strategy) | `529af34f7fd6` |
 | `panel-surex-wawanesa` | Wawanesa (via Surex panel) | The Wawanesa Mutual Insurance Company | broker | manual_handoff | derived | — | 2026-08-12T00:04:00.273165Z | Brief §3 (practical route strategy) | `20a8d5836781` |
 | `panel-lowestrates-zenith` | Zenith (via LowestRates.ca panel) | Zenith Insurance Company | aggregator | manual_handoff | derived | — | 2026-08-12T00:04:00.283229Z | Brief §3 (practical route strategy) | `3dd3307206d8` |
+| `route-caa-insurance` † | CAA Insurance | CAA Insurance Company | direct | ineligible | observed | 2026-08-09T18:48:16.284190+00:00 | 2026-08-13T00:30:24.497001Z | https://car-insurance.caainsurancecompany.com/auto/intro | `75bda2ae1941` |
 | `route-inova` | Inova | Inova | broker | affinity_restricted | derived | — | 2026-08-12T00:04:00.225259Z | Brief §4 (channel coverage requirements) | `fad1fb98e518` |
 | `seed-aig-aig-insurance-company-of-canada` | AIG Insurance Company of Canada | AIG Insurance Company of Canada | broker | specialty_only | derived | — | 2026-08-12T00:04:00.199414Z | Brief Appendix A (regulator seed list, retrieved 2026-08-06) | `23f7c1d28ca6` |
 | `seed-chubb-chubb-insurance-company-of-canada` | Chubb Insurance Company of Canada | Chubb Insurance Company of Canada | broker | specialty_only | derived | — | 2026-08-12T00:04:00.206248Z | Brief Appendix A (regulator seed list, retrieved 2026-08-06) | `1ba3883c0e90` |
@@ -133,7 +167,6 @@ or `not_currently_writing` this run — see §1.
 | `route-belairdirect` | belairdirect | Belair Insurance Company Inc. | direct | blocked | observed | 2026-08-09T18:47:00.526584+00:00 | 2026-08-12T00:04:22.316816Z | https://www.belairdirect.com/ | `f3bdfa3b16bf` |
 | `route-insurancehotline` | InsuranceHotline | InsuranceHotline | aggregator | blocked | observed | — | 2026-08-12T00:11:06.689138Z | https://www.insurancehotline.com/ | `1305137267a3` |
 | `route-aviva-direct` | Aviva Direct | Aviva Direct | direct | unreachable | observed | — | 2026-08-12T00:10:30.849602Z | https://www.aviva.ca/ | `9db8ef7f60b6` |
-| `route-caa-insurance` | CAA Insurance | CAA Insurance Company | direct | unreachable | observed | 2026-08-09T18:48:16.284190+00:00 | 2026-08-12T00:08:30.337178Z | https://www.caainsurancecompany.com/ | `2b140c80c38e` |
 | `route-co-operators` | Co-operators | Co-operators General Insurance Company | agent | unreachable | observed | — | 2026-08-11T19:20:26.609694Z | https://www.cooperators.ca/ | `714ba4007b27` |
 | `route-desjardins-insurance` | Desjardins Insurance | Certas Home and Auto Insurance Company | agent | unreachable | observed | — | 2026-08-11T19:21:34.671092Z | https://www.desjardinsgeneralinsurance.com/ | `37aa53df1f3e` |
 | `route-hagerty-collector-program` | Hagerty (collector program) | Aviva Insurance Company of Canada | MGA_program | unreachable | observed | — | 2026-08-12T00:12:03.579864Z | https://www.hagerty.ca/ | `fe44c543f0df` |
@@ -170,9 +203,18 @@ or `not_currently_writing` this run — see §1.
 | `seed-northbridge-verassure-insurance-company` | Verassure Insurance Company | Verassure Insurance Company | broker | unresolved | derived | — | 2026-08-12T00:04:00.279890Z | Brief Appendix A (regulator seed list, retrieved 2026-08-06) | `3792869592e4` |
 | `seed-intact-western-assurance-company` | Western Assurance Company | Western Assurance Company | broker | unresolved | derived | — | 2026-08-12T00:04:00.281034Z | Brief Appendix A (regulator seed list, retrieved 2026-08-06) | `bce6944a29a7` |
 
+† CAA Insurance's row is sourced to the later single-route re-run
+(`20260813T002253Z-46e0c6`), not the canonical run. The canonical run
+recorded `unreachable` for this route (killed by the batch hard-cap at 270
+seconds, no determination reached — the evidence for that attempt is still
+on disk, hash `2b140c80c38e`). The re-run reached further and got a real
+determination, so it supersedes the canonical result for this one route
+only, the same supersession model §6 already uses for whole runs. See §6a.
+
 Status counts: `manual_handoff` 22, `unresolved` 22, `specialty_only` 16,
-`unreachable` 15, `blocked` 3, `affinity_restricted` 1. Of the 79, 20 rows
-are `observed` (a market was actually contacted this run); 59 are `derived`
+`unreachable` 14, `blocked` 3, `affinity_restricted` 1, `ineligible` 1. Of
+the 79, 20 rows are `observed` (a market was actually contacted this run);
+59 are `derived`
 (planner-time conclusions from registry metadata — no contact attempted,
 because the route requires an intermediary/membership this profile doesn't
 have, is out of standard-PPA scope, or has no confirmed contact channel on
@@ -188,6 +230,16 @@ file yet).
 | Evidence rate (observed only) | **100.0%** | 20 of 20 market-contacted outcomes have a valid timestamp, source, and evidence artifact |
 | Duplicate suppression (registry-seeded) | **32** | 111 registry rows collapse to 79 distinct sources (seed-time collapse by `legal_underwriter`; the runtime dedupe resolver, Task 8b, is not built — see docs/KNOWN_LIMITATIONS.md §3) |
 | Freshness | **7.0%** | 4 of 57 verified-applicable sources were re-verified within the hackathon window (2026-08-09T00:00Z–2026-08-13T04:00Z) |
+
+CAA Insurance's status changed from `unreachable` to `ineligible` (§2) after
+the later single-route re-run; none of the five values above move. CAA
+already carried an evidence-backed terminal status and valid evidence
+before the re-run, so market completion, evidence rate, and duplicate
+suppression are unaffected by which terminal status it carries; comparable
+quote yield stays 0/57 because `ineligible` isn't `quoted_comparable`
+either; and freshness depends only on the registry's own `last_verified_at`
+stamp, which this run did not touch. Recomputed directly against the merged
+run data to confirm, not just reasoned through.
 
 "Verified applicable sources" (57) is docs/SCHEMAS.md's definition: registry
 rows whose status is not `unresolved`. 22 of the 79 distinct sources are
@@ -273,20 +325,28 @@ the match within the run, both are recorded at the lower-confidence
 market gates that this system's evidence trail cannot yet prove to the same
 standard as Sonnet and TD, not as genuine dead ends.
 
-**Our own automation limits — the market did not stop these, we did.**
-CAA Insurance (`route-caa-insurance`) was killed by the batch hard-cap
-timeout at 270 seconds with no determination reached. Onlia
-(`route-onlia`) exhausted its 12-step budget the same way. Neither
-produced any evidence of a market-side barrier — no consent screen, no bot
-check, no declaration. The underlying cause (docs/KNOWN_LIMITATIONS.md §3):
-when a form does not advance after a submit action, the agent has no way to
-discover why, because validation errors commonly render outside its
-viewport. Seven more `unreachable` routes share this same failure mode —
-Aviva Direct, Hagerty (collector program), PC Insurance, RBC Insurance,
-Scoop, Square One (this run), and ThinkInsure all ran out of step budget or
-were hard-capped with no determination reached, and none show any evidence
-of a market-side gate. This is our failure, not the market's, and it is the
-largest single reason this run's contact lane produced no price.
+**Our own automation limits — the market did not stop these, we did.** In
+the canonical run, CAA Insurance (`route-caa-insurance`) was killed by the
+batch hard-cap timeout at 270 seconds, with no determination reached — a
+system limit, not a market answer. A later single-route re-run got past
+that limit and reached a real determination; CAA is now counted under
+`ineligible`, not in this bucket (see the headline finding above and §6a).
+Onlia (`route-onlia`) exhausted its 12-step budget the same way and has not
+been re-run. Neither produced any evidence of a market-side barrier in the
+runs where they stalled — no consent screen, no bot check, no declaration.
+The underlying cause (docs/KNOWN_LIMITATIONS.md §3): when a form does not
+advance after a submit action, the agent has no way to discover why,
+because validation errors commonly render outside its viewport. Eight more
+`unreachable` routes share this same failure mode — Aviva Direct, Hagerty
+(collector program), PC Insurance, RBC Insurance, Scoop, Square One (this
+run), The Personal, and ThinkInsure all ran out of step budget or were
+hard-capped with no determination reached, and none show any evidence of a
+market-side gate (`The Personal` was missing from this list before this
+edit, though already counted in the executive summary's total). Together
+with Onlia, that is 9 pure automation-limit routes, matching the executive
+summary above now that CAA has moved out. This is our failure, not the
+market's, and it is the largest single reason this run's contact lane
+produced no price.
 
 Separately — and distinctly from the automation-limit bucket above — three
 more `unreachable` routes carry evidence of a possible market barrier the
@@ -347,3 +407,57 @@ both are cited by registry ID above (Square One's consent-declaration halt,
 All contact-lane results were re-run after both fixes landed. The canonical
 run (`20260812T000400Z-445a33`) is the current authoritative contact-lane
 data; `data/runs/latest.json` points at it.
+
+## 6a. CAA Insurance re-run
+
+One further, later, single-route re-run exists on disk:
+`20260813T002253Z-46e0c6`. It supersedes the canonical run's result for
+CAA Insurance (`route-caa-insurance`, `caa-insurance-company`) only — every
+other distinct source's result in this report is still the canonical run's.
+
+**Why it was re-run.** The canonical run's CAA attempt was killed by the
+batch hard-cap at 270 seconds mid-form, before reaching Driver Details (§4).
+Two fixes landed afterward, aimed specifically at getting further on this
+kind of form: a `first_name`/`last_name` vault-field alias (CAA's Driver
+Details splits legal name into two inputs, and the vault only held the
+combined name), and a new `select_choice` browser action for clicking a
+discrete choice control (a tile, card, or button) instead of typing into
+it, since CAA's licence-type question is a set of clickable `G`/`G2`/`G1`
+cards, not a text field or a native dropdown. The re-run used both fixes
+and reached, filled in, and submitted the entire Driver Details step —
+first name, last name, date of birth, gender, marital status, licence
+class, licence date, and years insured — with zero validation errors, then
+received CAA's decline.
+
+**How licence class G1 actually got selected — do not credit
+`select_choice`.** In this specific run, browser-use's own element-selector
+map never indexed the `G`/`G2`/`G1` tile elements, so `select_choice` had no
+element index to act on and did not fire. The model instead used its
+general-purpose `evaluate()` action to run JavaScript that scanned the
+page's choice-tile elements for the one containing the text `"G1"` and
+clicked it directly — a real click on the correct, real page element, found
+by matching the same profile fact
+(`licence.class = G1`) `select_choice` would have used, just via a
+different code path. The outcome is correct and the value was not
+fabricated; the mechanism is not the one built for this. `select_choice`
+did fire successfully elsewhere in this same run (gender and marital
+status, both native `<select>` dropdowns), so the fix is not inert — it
+just wasn't what selected G1 here.
+
+**Evidence.** Screenshot at `data/evidence/6b9158dc6651/attempt-1/evidence.png`
+(hash `75bda2ae1941...`, full hash in §2's row), captured
+2026-08-13T00:30:24.497001Z from
+`https://car-insurance.caainsurancecompany.com/auto/intro`. The image shows
+first and last name filled (redacted), date of birth filled (redacted),
+gender "Male" and marital status "Single" selected, the G1 tile shown
+selected (solid fill), and — above all of it — CAA's decline banner: *"Thank
+you for your inquiry but we are unable to provide you with a quote at this
+time. Please click here to find a local licensed CAA Agent or Broker who
+will be able to assist you."* No consent screen, declaration, identity
+check, or payment step was reached or presented at any point in this run;
+the guardrails were never engaged because nothing required them.
+
+**Confidence.** `confidence: "low"` in the stored `QuoteResult`, same as
+every other terminal status in this report outside `quoted_comparable` —
+this is a `hard_ineligibility` gate match on page text, not a firm quote,
+and CAA's page does not name a reason (see the headline finding above).
