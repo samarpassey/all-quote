@@ -201,7 +201,6 @@ __THEME_CSS__
     <h1>Results</h1>
     <div class="subtitle">One row per distinct rate source. Sort and filters never imply a
       ranking — position on this page is not a recommendation.</div>
-    <hr class="rule">
     <div class="meta" id="masthead-meta"></div>
   </header>
 
@@ -216,7 +215,6 @@ __THEME_CSS__
       <table class="ledger">
         <thead>
           <tr>
-            <th></th>
             <th>Status</th>
             <th>Brand</th>
             <th>Legal underwriter</th>
@@ -245,12 +243,6 @@ __THEME_CSS__
   var HACKATHON_START = "2026-08-09T00:00:00Z";
   var HACKATHON_END = "2026-08-13T04:00:00Z";
 
-  var STATUS_GLYPH = {
-    quoted_comparable: "■", quoted_non_comparable: "▨", estimate_only: "▤",
-    callback_required: "□", manual_handoff: "□", ineligible: "✕",
-    affinity_restricted: "✕", specialty_only: "✕", not_currently_writing: "✕",
-    blocked: "✕", unreachable: "✕", duplicate_rate_source: "=", unresolved: "·"
-  };
   var STATUS_LABEL = {
     quoted_comparable: "quoted, comparable", quoted_non_comparable: "quoted, non-comparable",
     estimate_only: "estimate only", callback_required: "callback required",
@@ -286,13 +278,15 @@ __THEME_CSS__
       " unresolved · personal use only, not insurance advice";
   })();
 
-  // -- metrics strip --
+  // -- metrics strip: hero card (the headline coverage figure) + a grid of
+  // supporting cards. Every caveat/sub line below is unchanged verbatim from
+  // the original figures list -- only the container markup changed. --
   (function renderMetrics() {
+    var hero = { label: "Market completion", value: fmtPct(METRICS.market_completion),
+      sub: "attempt coverage against the registry's own known universe (" +
+           METRICS.verified_applicable + " of " + METRICS.registry_distinct_sources +
+           " sources) — not retrieval success, and bounded by what the registry knows exists." };
     var figures = [
-      { label: "Market completion", value: fmtPct(METRICS.market_completion),
-        sub: "attempt coverage against the registry's own known universe (" +
-             METRICS.verified_applicable + " of " + METRICS.registry_distinct_sources +
-             " sources) — not retrieval success, and bounded by what the registry knows exists." },
       { label: "Comparable quote yield", value: fmtPct(METRICS.comparable_quote_yield),
         sub: "quoted_comparable ÷ verified applicable sources" },
       { label: "Evidence rate (all)", value: fmtPct(METRICS.evidence_rate_all),
@@ -302,15 +296,17 @@ __THEME_CSS__
       { label: "Freshness", value: fmtPct(METRICS.freshness),
         sub: "share of verified-applicable rows re-verified in the hackathon window" }
     ];
-    var host = document.getElementById("metrics-strip");
-    figures.forEach(function (f) {
+    function figureHtml(f, extraClass) {
       var isNa = f.value === null || f.value === undefined || f.value === "—";
-      host.appendChild(el(
-        '<div class="figure"><span class="num' + (isNa ? " na" : "") + '">' +
-        (isNa ? "—" : esc(f.value)) + '</span><span class="label">' + esc(f.label) +
-        '</span><span class="sub">' + esc(f.sub) + '</span></div>'
-      ));
-    });
+      return '<div class="figure' + (extraClass ? " " + extraClass : "") + '"><span class="num' +
+        (isNa ? " na" : "") + '">' + (isNa ? "—" : esc(f.value)) + '</span><span class="label">' +
+        esc(f.label) + '</span><span class="sub">' + esc(f.sub) + '</span></div>';
+    }
+    var host = document.getElementById("metrics-strip");
+    host.appendChild(el(figureHtml(hero, "hero")));
+    var grid = el('<div class="grid"></div>');
+    figures.forEach(function (f) { grid.appendChild(el(figureHtml(f))); });
+    host.appendChild(grid);
   })();
 
   // -- filters --
@@ -364,7 +360,8 @@ __THEME_CSS__
 
   function verifiedCell(r) {
     return isVerifiedInWindow(r.last_verified_at)
-      ? '<span class="stamp-badge">VERIFIED<br>' + esc(r.last_verified_at) + "</span>" : "";
+      ? '<span class="stamp-badge">VERIFIED<span class="verified-time">' +
+        esc(r.last_verified_at) + "</span></span>" : "";
   }
 
   function drawerHtml(r) {
@@ -419,11 +416,11 @@ __THEME_CSS__
     visible.forEach(function (r, i) {
       var band = (Math.floor(i / 2) % 2 === 0 ? "r" : "b") + (i % 2);
       var state = isVerifiedInWindow(r.last_verified_at) ? "verified" : "ghost";
-      var glyphCls = r.status === "blocked" ? "glyph blocked" : "glyph";
+      var pill = '<span class="status-pill"><span class="dot"></span>' +
+        esc(STATUS_LABEL[r.status]) + "</span>";
       var tr = el(
         '<tr class="' + band + " " + state + ' row-clickable" tabindex="0" role="button">' +
-        '<td><span class="' + glyphCls + '">' + STATUS_GLYPH[r.status] + "</span></td>" +
-        "<td>" + esc(STATUS_LABEL[r.status]) + "</td>" +
+        "<td>" + pill + "</td>" +
         "<td>" + esc(r.brand_or_program) + "</td>" +
         "<td>" + esc(r.legal_underwriter) + "</td>" +
         "<td>" + esc(r.insurer_group) + "</td>" +

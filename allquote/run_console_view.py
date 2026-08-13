@@ -76,21 +76,18 @@ _TEMPLATE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 __THEME_CSS__
-.run-controls { display: flex; align-items: baseline; gap: 20px; margin: 24px 0; }
-.run-action {
-  font-size: 13px; font-weight: 600; color: var(--text-primary);
-  border-bottom: 1px solid var(--border-strong); padding-bottom: 2px;
+.run-controls { display: flex; align-items: center; gap: 16px; margin: 24px 0; }
+.run-progress { font-size: 13px; color: var(--text-label); }
+.run-finished-cta {
+  margin: 0 0 32px 0; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;
+  background: var(--pos-bg); border: 1px solid #BEE8CD; border-radius: var(--radius-md);
 }
-.run-action:hover { text-decoration: underline; }
-.run-action:disabled { color: var(--text-muted); cursor: default; text-decoration: none; }
-.run-progress { font-size: 12px; color: var(--text-label); }
-.run-finished-cta { margin: 0 0 32px 0; }
+.run-finished-cta span.label { font-size: 13.5px; font-weight: 600; color: var(--pos-ink); }
 .run-finished-cta a {
-  display: inline-block; font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
-  color: var(--text-primary); text-decoration: none;
-  border-bottom: 1px solid var(--border-strong); padding-bottom: 2px;
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700;
+  color: #fff; background: var(--pos-ink); text-decoration: none; padding: 8px 14px; border-radius: var(--radius-sm);
 }
-.run-finished-cta a:hover { text-decoration: underline; }
+.run-finished-cta a:hover { opacity: 0.9; }
 </style>
 </head>
 <body>
@@ -101,16 +98,16 @@ __THEME_CSS__
     <div class="subtitle">Starts the batch planner and shows each route's terminal status as
       it lands. A full batch covers the whole registry and can run long — this is meant to be
       watched during a walkthrough, not waited on to completion.</div>
-    <hr class="rule">
   </header>
 
   <div class="run-controls">
-    <button type="button" class="run-action" id="start-btn">Start run &rarr;</button>
+    <button type="button" class="btn btn-primary" id="start-btn">Start run &rarr;</button>
     <div class="run-progress" id="run-progress"></div>
   </div>
 
   <div class="run-finished-cta" id="run-finished-cta" hidden>
-    <a href="/results">Run finished — View results &rarr;</a>
+    <span class="label">Run finished</span>
+    <a href="/results">View results &rarr;</a>
   </div>
 
   <section class="block">
@@ -131,13 +128,6 @@ __THEME_CSS__
   "use strict";
   var LATEST_RUN_ID = __LATEST_RUN_ID__;
   var pollTimer = null;
-
-  var STATUS_GLYPH = {
-    quoted_comparable: "■", quoted_non_comparable: "▨", estimate_only: "▤",
-    callback_required: "□", manual_handoff: "□", ineligible: "✕",
-    affinity_restricted: "✕", specialty_only: "✕", not_currently_writing: "✕",
-    blocked: "✕", unreachable: "✕", duplicate_rate_source: "=", unresolved: "·"
-  };
 
   function esc(s) {
     if (s === null || s === undefined) return "";
@@ -161,14 +151,16 @@ __THEME_CSS__
     body.innerHTML = "";
     data.routes.forEach(function (r, i) {
       var band = (Math.floor(i / 2) % 2 === 0 ? "r" : "b") + (i % 2);
-      var glyph = r.status ? (STATUS_GLYPH[r.status] || "?") : "";
+      var statusCell = r.status
+        ? '<span class="status-pill"><span class="dot"></span>' + esc(r.status) + "</span>"
+        : "—";
       var tr = document.createElement("tr");
       tr.className = band;
       tr.innerHTML =
         "<td>" + esc(r.brand_or_program) + "</td>" +
         "<td>" + esc(r.lane) + "</td>" +
         "<td>" + esc(stateLabel(r)) + "</td>" +
-        "<td>" + glyph + " " + esc(r.status || "—") + "</td>" +
+        "<td>" + statusCell + "</td>" +
         "<td>" + esc(r.landed_at || "—") + "</td>";
       body.appendChild(tr);
     });

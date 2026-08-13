@@ -165,6 +165,19 @@ deadline.
   Task 5 browser-executor teardown bug; mitigated, not eliminated. Batch
   runs can leave detached Chromium processes behind when a route is killed
   by the hard-cap timeout rather than exiting cleanly.
+- **`/api/run/start`'s in-flight-run guard does not survive a server
+  restart.** `app.py`'s `_active_run_id` lock lives in the handler class's
+  in-memory state, not on disk; `batch.run_batch()`'s subprocesses are never
+  made children of anything the server tracks past that point, so killing
+  or restarting the server process does not stop a batch already in flight
+  — it just stops the server from knowing about it. Repeated dev-session
+  restarts of `make app` while a run was mid-flight (observed twice in one
+  evening) produced several orphaned `data/runs/<run_id>/` directories with
+  partial results and no manifest notes, which briefly skewed the results
+  view's canonical/superseded-route accounting until manually removed. Not
+  fixed: would need either a durable run registry the server re-attaches to
+  on startup, or making the batch subprocess group killable by the server's
+  own shutdown hook.
 - **Registry write-back (docs/ARCHITECTURE.md rule 5) is not implemented.**
   No code path writes a run's resolved status back to `data/allquote.db`'s
   live `status` column. `market_completion`, `comparable_quote_yield`, and
