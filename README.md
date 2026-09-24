@@ -49,9 +49,12 @@ make app                                # the console at http://localhost:8000
 app shows. `data/seed_registry.json` is the only thing under `data/` in git; the database, runs and
 evidence are local and gitignored.
 
-`make test` runs the pytest suite. The browser-executor tests in `tests/test_executor.py` drive a
-real Chromium against local fixtures, so they depend on the installed `browser-use` and Playwright
-build; the rest of the suite does not.
+`make test` runs 247 tests and needs no browser. The 22 browser-driven tests in
+`tests/test_executor.py` are marked `live_browser` and excluded by default: they drive the
+machine's own installed Google Chrome, which this project does not pin and cannot control, and on
+Chrome 153 the agent's tab is detached mid-run, so every outcome collapses to `unreachable`. The
+same failure appears on browser-use 0.13.1, 0.13.4, 0.13.7 and 0.13.10, so it is not a library
+version that a pin could fix. `make test-live` runs them against whatever Chrome is installed.
 
 Nothing here contacts a real insurer until you start a run from the console or pass `--live` to a
 single route. Read [`docs/GUARDRAILS.md`](docs/GUARDRAILS.md) before the first live run.

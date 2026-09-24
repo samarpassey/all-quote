@@ -10,7 +10,7 @@ flowchart TD
     A[One-time intake\nIntakeProfile] --> P[Route planner]
     V[(Encrypted vault\nlicence, DOB, VIN)] -.inject at fill-time.-> B
     V -.-> C
-    R[(Market registry\nSQLite, 60 seed entities)] --> P
+    R[(Market registry\nSQLite, 111 seed rows)] --> P
     P --> B[Browser executor\nbrowser-use + Playwright]
     P --> C[Voice executor\nVapi + Twilio]
     P --> H[Human checkpoint\nconsent / identity / advice]

@@ -1,4 +1,4 @@
-.PHONY: setup test run dashboard app intake export export-registry
+.PHONY: setup test test-live run dashboard app intake export export-registry
 
 setup:
 	uv sync
@@ -6,6 +6,9 @@ setup:
 
 test:
 	uv run --no-sync pytest -q
+
+test-live:  # the browser-driven executor tests; needs a stable local Chrome
+	uv run --no-sync pytest -q -m live_browser
 
 run:
 	uv run --no-sync python -m allquote.planner run --route $(ROUTE)
