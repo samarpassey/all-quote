@@ -63,8 +63,8 @@ class EvidenceRate:
     to build a row with an empty evidence_artifact) — so this is really
     checking for a malformed/bypassed row, not a normal gap.
 
-    The one real ambiguity BRIEF.md doesn't settle: derived-lane outcomes
-    (provenance="derived" — no market was actually contacted, the status is
+    The one real ambiguity the challenge brief doesn't settle: derived-lane
+    outcomes (provenance="derived" — no market was contacted, the status is
     resolved from our own registry metadata) DO carry a real artifact: their
     QuoteResult still points at a redacted, hashed document (the cited-fields
     reasoning JSON), written through the same evidence.py path as an observed

@@ -1,5 +1,5 @@
-"""RESULTS view: one row per distinct rate source, per BRIEF.md §7's
-"Comparison experience". Reads the single merged-snapshot data path
+"""RESULTS view: one row per distinct rate source, per the challenge brief's
+§7 "Comparison experience". Reads the single merged-snapshot data path
 report.py owns (report.merge_runs / report.build_registry_snapshot /
 report.compute_report) — this module adds no second way to read run data,
 and never writes to data/allquote.db.

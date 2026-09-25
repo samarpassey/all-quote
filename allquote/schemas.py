@@ -610,7 +610,7 @@ class PriceView(BaseModel):
 class ComparisonReport(BaseModel):
     """Reports only — never sets status (allquote.normalize owns that via
     assess_comparability). Field declaration order is significant: coverage
-    differences must serialize before price, per BRIEF.md §7 ("see coverage
+    differences must serialize before price, per the brief's §7 ("see coverage
     differences before price differences")."""
 
     inputs: list[str]

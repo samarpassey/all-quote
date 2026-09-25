@@ -9,7 +9,7 @@ Unit of work is the DISTINCT rate source (79), not the registry row (111):
 several registry rows can share one `distinct_rate_source_id` (e.g. a
 hand-curated `route-*` row and its raw `seed-*` Appendix A counterpart, or
 several aggregator `panel-*` disclosures naming the same underwriter).
-BRIEF.md's market_completion and comparable_quote_yield metrics divide by
+The challenge brief's market_completion and comparable_quote_yield metrics divide by
 distinct rate sources, so planning one route per distinct source keeps the
 queue population and the metric denominator the same set. The non-primary
 rows in a group are deliberately left untouched in the registry — Task 8b's

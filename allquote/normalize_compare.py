@@ -29,7 +29,7 @@ PRICED_TRIAD: frozenset[Status] = frozenset(
 )
 
 # A market's rep is a licensed intermediary for these distribution channels
-# (MarketRecord.distribution_type). "residual" per BRIEF.md §3: Facility
+# (MarketRecord.distribution_type). "residual" per the brief's §3: Facility
 # Association "is accessed through a licensed intermediary, not a normal
 # direct quote path."
 LICENSED_INTERMEDIARY_CHANNELS: frozenset[str] = frozenset({"agent", "broker", "MGA_program", "residual"})
@@ -128,7 +128,7 @@ def derive_priced_status(current: Status, comparability: Comparability) -> Statu
 
 
 def derive_confidence(comparability: Comparability, distribution_type: str, final_status: Status) -> str:
-    # high = exact premium + matching coverage (BRIEF.md §7).
+    # high = exact premium + matching coverage (the brief's §7).
     if comparability == Comparability.IDENTICAL_BASIS:
         return "high"
     # medium = a licensed representative's documented quote, REGARDLESS of

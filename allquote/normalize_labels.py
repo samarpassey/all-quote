@@ -11,7 +11,7 @@ whether a difference is worth flagging, only what a label denotes.
 
 The two exceptions — INFERENCE_RULES and BASIS_DEFAULTS below — are still
 data, not judgement: each is a small, fixed table of (input -> output) pairs
-taken directly from BRIEF.md, not a rule computed from a comparison.
+taken directly from the challenge brief, not a rule computed from a comparison.
 """
 
 import re
@@ -112,7 +112,7 @@ def parse_currency_amount(value: str | None) -> int | None:
     return int(amount)
 
 
-# --- permitted inferences (A3: exactly two, both from BRIEF.md §6) ----------
+# --- permitted inferences (A3: exactly two, both from the brief's §6) -------
 #
 # Each rule: if `trigger` dimension/disclosure is present in a quote's lines,
 # emit the listed (dimension, disclosure) lines with provenance="derived",
@@ -139,7 +139,7 @@ INFERENCE_RULES: list[InferenceRule] = [
         (_D.OPCF_49_DCPD_OPT_OUT, DisclosureState.INCLUDED),
         ((_D.DCPD, DisclosureState.EXCLUDED),),
         "OPCF 49 (DCPD opt-out) was disclosed as included; DCPD is inferred excluded as a "
-        "result — per BRIEF.md §6, collision and all-perils implications should be verified "
+        "result — per the brief's §6, collision and all-perils implications should be verified "
         "separately",
     ),
 ]
@@ -152,12 +152,12 @@ INFERENCE_RULES: list[InferenceRule] = [
 # dimensions not otherwise derivable from a real CoverageBenchmark field.
 
 BASIS_DEFAULTS: dict[CoverageDimension, DisclosureState] = {
-    # Mandatory by law; per BRIEF.md §6, only medical, rehabilitation and
+    # Mandatory by law; per the brief's §6, only medical, rehabilitation and
     # attendant care remain mandatory for new Ontario policies after July 1,
     # 2026 — not a limit we synthesize, so this dimension carries no
     # limit_cad in the basis.
     _D.ACCIDENT_BENEFITS_MANDATORY: DisclosureState.INCLUDED,
-    # Mandatory Ontario coverage; BRIEF.md §6 requires included status and
+    # Mandatory Ontario coverage; the brief's §6 requires included status and
     # limit details where returned.
     _D.UNINSURED_AUTOMOBILE: DisclosureState.INCLUDED,
     # The demo benchmark elects collision + comprehensive; specified perils
