@@ -22,13 +22,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["allquote"]
-
-[tool.pytest.ini_options]
-# The browser-driven executor tests are excluded by default: they drive the
-# machine's installed Google Chrome, whose version this project does not pin
-# and cannot control, and the agent's tab is detached mid-run on Chrome 153.
-# Run them with `make test-live` (or `pytest -m live_browser`).
-addopts = "-m 'not live_browser'"
-markers = [
-    "live_browser: needs a stable local Chrome session; see README",
-]

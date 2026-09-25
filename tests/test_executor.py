@@ -67,7 +67,7 @@ def _gate_page_driver_factory():
     gate_box first, before ever looking at the outcome.
     """
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
         await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="budget", final_result=None, steps_used=1)
@@ -91,7 +91,7 @@ def _benchmark_extraction(**overrides) -> dict:
 
 
 def _done_driver_factory(extraction: dict):
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
         await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="done", final_result=json.dumps(extraction), steps_used=1)
@@ -136,7 +136,6 @@ def vaulted_profile(tmp_path):
         ("real_consent_gate.html", Status.MANUAL_HANDOFF),
     ],
 )
-@pytest.mark.live_browser
 def test_gate_fixture_status_mapping(fixture_name, expected_status, tmp_path, fixture_server, market_record, vaulted_profile):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
@@ -192,7 +191,6 @@ def test_footer_promo_consent_is_not_a_gate(tmp_path, fixture_server, market_rec
 # --- gate evidence: reason states whether the screenshot corroborates it ---
 
 
-@pytest.mark.live_browser
 def test_gate_reason_has_no_caveat_when_matched_text_is_scrolled_into_view(
     tmp_path, fixture_server, market_record, vaulted_profile
 ):
@@ -222,7 +220,6 @@ def test_gate_reason_has_no_caveat_when_matched_text_is_scrolled_into_view(
     assert "may not show this text" not in result.outcome.failure_reason
 
 
-@pytest.mark.live_browser
 def test_gate_reason_has_caveat_when_matched_text_cannot_be_located(
     tmp_path, fixture_server, market_record, vaulted_profile
 ):
@@ -264,14 +261,13 @@ def test_gate_reason_has_caveat_when_matched_text_cannot_be_located(
 # first hit. The reported QuoteResult must describe B3's gate, never A's.
 
 
-@pytest.mark.live_browser
 def test_final_status_reflects_the_page_the_run_ended_on_not_a_stale_earlier_hit(
     tmp_path, fixture_server, market_record, vaulted_profile
 ):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
 
         # Step 1: target_url is repro_page_a.html (run_route already
@@ -327,7 +323,6 @@ def test_final_status_reflects_the_page_the_run_ended_on_not_a_stale_earlier_hit
 # --- success path -------------------------------------------------------------
 
 
-@pytest.mark.live_browser
 def test_happy_path_quoted_comparable(tmp_path, fixture_server, market_record, vaulted_profile):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
@@ -354,7 +349,6 @@ def test_happy_path_quoted_comparable(tmp_path, fixture_server, market_record, v
     assert result.coverage.variance_from_benchmark == []
 
 
-@pytest.mark.live_browser
 def test_happy_path_quoted_non_comparable_on_deductible_mismatch(
     tmp_path, fixture_server, market_record, vaulted_profile
 ):
@@ -381,7 +375,6 @@ def test_happy_path_quoted_non_comparable_on_deductible_mismatch(
     assert any("collision_deductible" in v for v in result.coverage.variance_from_benchmark)
 
 
-@pytest.mark.live_browser
 def test_estimate_only_when_not_a_firm_price(tmp_path, fixture_server, market_record, vaulted_profile):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
@@ -409,12 +402,11 @@ def test_estimate_only_when_not_a_firm_price(tmp_path, fixture_server, market_re
 # --- halt-status rule ----------------------------------------------------------
 
 
-@pytest.mark.live_browser
 def test_halt_without_independent_gate_maps_to_unreachable(tmp_path, fixture_server, market_record, vaulted_profile):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
         # Benign page -- the real hook finds nothing.
         await _tick_hook(hook, target_url, browser_session)
@@ -442,12 +434,11 @@ def test_halt_without_independent_gate_maps_to_unreachable(tmp_path, fixture_ser
     assert "captcha_or_bot_check" in result.outcome.failure_reason
 
 
-@pytest.mark.live_browser
 def test_halt_with_independent_gate_detector_wins(tmp_path, fixture_server, market_record, vaulted_profile):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
         # captcha.html -- the real hook DOES find something here.
         await _tick_hook(hook, target_url, browser_session)
@@ -483,7 +474,7 @@ def test_budget_exhaustion_maps_to_unreachable_not_success(tmp_path, fixture_ser
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
         await _tick_hook(hook, target_url, browser_session)
         return AttemptOutcome(ended_via="budget", final_result=None, steps_used=max_steps)
@@ -527,7 +518,6 @@ def _real_pid(browser_session) -> int:
     return pid
 
 
-@pytest.mark.live_browser
 def test_browser_process_stopped_after_transient_timeout_and_retry(
     tmp_path, fixture_server, market_record, vaulted_profile
 ):
@@ -539,7 +529,7 @@ def test_browser_process_stopped_after_transient_timeout_and_retry(
     profile, _, vault_path = vaulted_profile
     pids: list[int] = []
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
         pids.append(_real_pid(browser_session))
         raise TimeoutError("simulated asyncio.wait_for(agent.run(...)) timeout")
@@ -567,7 +557,6 @@ def test_browser_process_stopped_after_transient_timeout_and_retry(
         assert not psutil.pid_exists(pid), f"browser process {pid} survived _run_single_attempt teardown"
 
 
-@pytest.mark.live_browser
 def test_browser_process_stopped_after_non_transient_exception(tmp_path, fixture_server, market_record, vaulted_profile):
     # A non-transient exception (e.g. Agent construction failing outright)
     # never retries -- exactly one attempt, exactly one process, and it must
@@ -577,7 +566,7 @@ def test_browser_process_stopped_after_non_transient_exception(tmp_path, fixture
     profile, _, vault_path = vaulted_profile
     pids: list[int] = []
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         pids.append(_real_pid(browser_session))
         raise RuntimeError("simulated Agent construction failure")
 
@@ -602,7 +591,6 @@ def test_browser_process_stopped_after_non_transient_exception(tmp_path, fixture
     assert not psutil.pid_exists(pids[0]), f"browser process {pids[0]} survived _run_single_attempt teardown"
 
 
-@pytest.mark.live_browser
 def test_browser_process_stopped_after_gate_halt(tmp_path, fixture_server, market_record, vaulted_profile):
     # The gate-hit path never raises at all (agent_box[0].stop() just sets a
     # flag; agent_runner returns a normal AttemptOutcome) -- this is the
@@ -613,7 +601,7 @@ def test_browser_process_stopped_after_gate_halt(tmp_path, fixture_server, marke
     profile, _, vault_path = vaulted_profile
     pids: list[int] = []
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
         pids.append(_real_pid(browser_session))
         await _tick_hook(hook, target_url, browser_session)
@@ -643,13 +631,12 @@ def test_browser_process_stopped_after_gate_halt(tmp_path, fixture_server, marke
 # --- retry / is_transient integration ------------------------------------------
 
 
-@pytest.mark.live_browser
 def test_transient_failure_retries_and_second_attempt_succeeds(tmp_path, fixture_server, market_record, vaulted_profile):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
     calls = {"n": 0}
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ConnectionError("simulated transient failure on attempt 1")
@@ -682,13 +669,12 @@ def test_transient_failure_retries_and_second_attempt_succeeds(tmp_path, fixture
     assert matching, "expected a run directory with both attempt-1 and attempt-2 subdirectories"
 
 
-@pytest.mark.live_browser
 def test_non_transient_failure_does_not_retry(tmp_path, fixture_server, market_record, vaulted_profile):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
     calls = {"n": 0}
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         calls["n"] += 1
         raise ValueError("not a transient failure")
 
@@ -791,7 +777,6 @@ def test_browser_attempt_evidence_is_observed_provenance(tmp_path, fixture_serve
 # --- evidence-capture failure never destroys the result -----------------------
 
 
-@pytest.mark.live_browser
 def test_screenshot_capture_failure_falls_back_and_preserves_status(
     tmp_path, fixture_server, market_record, vaulted_profile, monkeypatch
 ):
@@ -873,13 +858,12 @@ def test_live_requires_flag_and_confirmation(tmp_path, fixture_server, market_re
     assert called["run_route"] is False
 
 
-@pytest.mark.live_browser
 def test_non_live_never_touches_the_real_quote_url(tmp_path, fixture_server, market_record, vaulted_profile):
     record, db_path = market_record
     profile, _, vault_path = vaulted_profile
     navigated_urls = []
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         navigated_urls.append(target_url)
         agent_box.append(_FakeAgent())
         await _tick_hook(hook, target_url, browser_session)
@@ -911,7 +895,6 @@ def test_non_live_never_touches_the_real_quote_url(tmp_path, fixture_server, mar
 # --- sentinel grep: no plaintext survives anywhere on disk ---------------------
 
 
-@pytest.mark.live_browser
 def test_sentinel_never_survives_in_any_evidence_artifact(tmp_path, fixture_server, market_record, vaulted_profile):
     """Seeds a known fake licence number into the vault, fills it into a real
     page field (exercising the real CDP typing + redaction pipeline, not a
@@ -924,7 +907,7 @@ def test_sentinel_never_survives_in_any_evidence_artifact(tmp_path, fixture_serv
     sentinel = plaintext["licence_number"]
     evidence_root = tmp_path / "evidence"
 
-    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile):
+    async def driver(*, browser_session, tools, sensitive_data, hook, agent_box, target_url, max_steps, timeout_s, profile, extra_task_instructions=None):
         agent_box.append(_FakeAgent())
         await browser_session.get_browser_state_summary(include_screenshot=False)
         index = await browser_session.get_index_by_id("licence_number")
