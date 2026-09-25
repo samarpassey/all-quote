@@ -1,6 +1,8 @@
 # Known limitations
 
-Per BRIEF.md §9: where the system depends on a human, a licensed intermediary,
+Per §9 of the challenge brief, the organizer's participant brief for the Ontario
+All-Quote Agent Challenge (not reproduced in this repository; see
+docs/SCHEMAS.md): where the system depends on a human, a licensed intermediary,
 a membership, terms permission, or an unavailable integration — plus every
 defect found during the build, fixed or not. This document supersedes the
 "Known limitations" section of docs/GUARDRAILS.md, which is retained as the
@@ -27,7 +29,7 @@ docs/RUN_REPORT.md for the run's coverage ledger and metrics.
   recorded `affinity_restricted` per docs/SCHEMAS.md's own definition of that
   status, not attempted.
 - **22 unresolved routes need registry research that was not completed.**
-  These are legal entities carried over from BRIEF.md Appendix A's regulator
+  These are legal entities carried over from the brief's Appendix A regulator
   seed list with no confirmed public Ontario PPA quote route on file —
   no `quote_url`, no `public_phone_route`. Per docs/SCHEMAS.md, `unresolved`
   is never silently converted to a negative outcome; the honest state is "we

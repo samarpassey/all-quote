@@ -4,6 +4,12 @@ allquote/schemas.py must mirror this file exactly. Field names below are canonic
 never rename, alias, or improvise. Derived from the hackathon brief (OAF 1 superset,
 Appendix B market record, section 7 result schema).
 
+**The brief** is the participant brief for the Ontario All-Quote Agent Challenge, August 2026: the
+organizer's document, which set the required intake fields, the result schema, the status
+vocabulary and the five metrics. It is the organizer's to publish, so it is not reproduced in this
+repository. Section references in this file and elsewhere (§3, §6, §7, §9, Appendix A, Appendix B)
+point into that document.
+
 ## Status enum — exactly these 13 values
 
 | value | meaning |
@@ -118,7 +124,7 @@ MarketRecord, QuoteResult, EvidenceRecord, VaultRef), which are unchanged by
 this section. Owned by `allquote/normalize.py` and `allquote/normalize_labels.py`.
 
 **CoverageDimension** — FIXED 27-value enum, guarded by a test mirroring the
-Status guard. Verified against BRIEF.md §6/§7: third_party_liability,
+Status guard. Verified against the brief's §6/§7: third_party_liability,
 accident_benefits_mandatory, the 13 optional accident benefits named in §6
 ("Optional benefits to record") each as its own `ab_opt_*` member (never
 merged), uninsured_automobile, dcpd, the 4 own-damage perils (specified
